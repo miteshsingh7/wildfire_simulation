@@ -108,27 +108,33 @@ def evaluate_perimeters() -> dict[str, pd.DataFrame]:
 
     gdf_geomac["datetime_utc"] = gdf_geomac["perimeterdatetime"].apply(to_utc_str)
 
-    # Select representative perimeters:
-    # 1. Early Day 1: 2018-11-08 17:54 UTC (~+3.5h from ignition)
-    # 2. Evening Day 1: 2018-11-09 00:00 UTC (~+9.5h from ignition)
-    # 3. Final Contained: 2018-11-25 18:22 UTC (Day 17 contained, 62,053 ha)
+    # Corrected GeoMAC perimeters based on forensic timeline audit:
+    # 1. ID 1052: IR perimeter mapping flight at 17:54 PST Nov 8 (01:54 UTC Nov 9).
+    #    NIST TN 2135 p. 127 explicitly documents flight began at 17:54 PST (+11.4h / 684 min post-ignition).
+    #    Area: 54,586.4 acres (22,090.3 ha).
+    # 2. ID 1398: Final contained perimeter (2018-11-25 18:22 UTC = Day 17 contained).
+    #    Area: 153,335.6 acres (62,052.7 ha).
+    # Note: No observed perimeters exist in GeoMAC for +3h or +6h.
     perim_cases = [
         {
-            "name": "+3.5 h GeoMAC Infrared Flight",
-            "dt_utc": "2018-11-08 17:54:00 UTC",
-            "eval_sim_t": 210.0,  # 3.5h
-            "metric_label": "+3.5 h Perimeter Overlap",
+            "name": "+11.4 h GeoMAC IR Overflight (17:54 PST)",
+            "objectid": 1052,
+            "dt_utc": "2018-11-09 01:54:00 UTC",
+            "eval_sim_t": 684.0,  # +11.4 h (684 min)
+            "metric_label": "+11.4 h Observed vs +11.4 h Sim Overlap",
             "target_acres": 54586.4,
         },
         {
-            "name": "+9.5 h GeoMAC Evening Perimeter",
-            "dt_utc": "2018-11-09 00:00:00 UTC",
-            "eval_sim_t": 570.0,  # 9.5h
-            "metric_label": "+9.5 h Perimeter Overlap",
-            "target_acres": 70454.1,
+            "name": "+11.4 h GeoMAC IR Overflight vs +12 h Sim",
+            "objectid": 1052,
+            "dt_utc": "2018-11-09 01:54:00 UTC",
+            "eval_sim_t": 720.0,  # +12.0 h (720 min)
+            "metric_label": "+11.4 h Observed vs +12 h Sim Overlap",
+            "target_acres": 54586.4,
         },
         {
             "name": "Final Contained CAL FIRE / GeoMAC",
+            "objectid": 1398,
             "dt_utc": "2018-11-25 18:22:00 UTC",
             "eval_sim_t": 720.0,  # 12h sim output
             "metric_label": "Final-Footprint Overlap (+12h Sim vs Final Contained)",
@@ -138,7 +144,7 @@ def evaluate_perimeters() -> dict[str, pd.DataFrame]:
 
     perimeter_results = []
     for case in perim_cases:
-        subset = gdf_geomac[gdf_geomac["datetime_utc"] == case["dt_utc"]]
+        subset = gdf_geomac[gdf_geomac["OBJECTID"] == case["objectid"]]
         if len(subset) == 0:
             continue
         geom = subset.geometry.iloc[0]

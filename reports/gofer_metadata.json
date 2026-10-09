@@ -1,0 +1,166 @@
+{
+  "created": "2025-01-14T03:09:29.616384+00:00",
+  "modified": "2025-01-14T03:09:29.919515+00:00",
+  "id": 14642378,
+  "conceptrecid": "8327264",
+  "doi": "10.5281/zenodo.14642378",
+  "conceptdoi": "10.5281/zenodo.8327264",
+  "doi_url": "https://doi.org/10.5281/zenodo.14642378",
+  "metadata": {
+    "title": "GOES-Observed Fire Event Representation (GOFER) product for 28 California wildfires from 2019-2021",
+    "doi": "10.5281/zenodo.14642378",
+    "publication_date": "2025-01-13",
+    "description": "<p>The GOES-Observed Fire Event Representation (GOFER) algorithm uses geostationary satellite observations of active fires from GOES-East and GOES-West to map the hourly progression of large wildfires (over 50,000 acres or 202 sq. km). GOES observes North and South America with a spatial resolution of 2 km at the equator and at a frequency of 10-15 minutes for the full disk view. Along with the fire perimeter, we derive the active fire lines and fire spread rates. We tested the GOFER algorithm on a set of 28 wildfires in California from 2019-2021 and produced three versions of the product: GOFER-Combined, GOFER-East, and GOFER-West. GOFER-Combined uses both GOES-East and GOES-West observations, while GOFER-East and GOFER-West use only GOES-East and only GOES-West observations, respectively. We find that GOFER performs reasonably well compared to final perimeters from California's Fire and Resource Assessment Program (FRAP) and 12-hourly perimeters from the Fire Event Data Suite (FEDS), derived from 375-m active fire observations. See our&nbsp;<a href=\"https://globalfires.earthengine.app/view/gofer\">GOFER Visualization</a>&nbsp;app on Earth Engine Apps for an overview of the dataset, alongside other datasets, such as FEDS and FRAP perimeters and 30-m burn severity from Monitoring Trends in Burn Severity (MTBS). Please refer to the corresponding <a href=\"https://github.com/tianjialiu/GOFER\">GitHub repository</a> for the code, detailed dataset description, and version history.</p>",
+    "access_right": "open",
+    "creators": [
+      {
+        "name": "Liu, Tianjia",
+        "affiliation": "University of California, Irvine",
+        "orcid": "0000-0003-3129-0154"
+      },
+      {
+        "name": "Randerson, James T.",
+        "affiliation": "University of California, Irvine"
+      },
+      {
+        "name": "Chen, Yang",
+        "affiliation": "University of California, Irvine"
+      },
+      {
+        "name": "Morton, Douglas C.",
+        "affiliation": "NASA Goddard Space Flight Center"
+      },
+      {
+        "name": "Wiggins, Elizabeth B.",
+        "affiliation": "NASA Langley Research Center"
+      },
+      {
+        "name": "Smyth, Padhraic",
+        "affiliation": "University of California, Irvine"
+      },
+      {
+        "name": "Foufoula-Georgiou, Efi",
+        "affiliation": "University of California, Irvine"
+      },
+      {
+        "name": "Nadler, Roy",
+        "affiliation": "Google"
+      },
+      {
+        "name": "Nevo, Omer",
+        "affiliation": "Google"
+      }
+    ],
+    "keywords": [
+      "wildfires",
+      "remote sensing",
+      "satellite data",
+      "GOES",
+      "geostationary",
+      "fire perimeter",
+      "fire spread",
+      "fire line",
+      "California"
+    ],
+    "related_identifiers": [
+      {
+        "identifier": "10.5194/essd-16-1395-2024",
+        "relation": "isDescribedBy",
+        "resource_type": "publication",
+        "scheme": "doi"
+      }
+    ],
+    "version": "0.2",
+    "language": "eng",
+    "custom": {
+      "code:codeRepository": "https://github.com/tianjialiu/GOFER"
+    },
+    "resource_type": {
+      "title": "Dataset",
+      "type": "dataset"
+    },
+    "license": {
+      "id": "cc-by-4.0"
+    },
+    "relations": {
+      "version": [
+        {
+          "index": 4,
+          "is_last": true,
+          "parent": {
+            "pid_type": "recid",
+            "pid_value": "8327264"
+          }
+        }
+      ]
+    }
+  },
+  "title": "GOES-Observed Fire Event Representation (GOFER) product for 28 California wildfires from 2019-2021",
+  "links": {
+    "self": "https://zenodo.org/api/records/14642378",
+    "self_html": "https://zenodo.org/records/14642378",
+    "preview_html": "https://zenodo.org/records/14642378?preview=1",
+    "doi": "https://doi.org/10.5281/zenodo.14642378",
+    "self_doi": "https://doi.org/10.5281/zenodo.14642378",
+    "self_doi_html": "https://zenodo.org/doi/10.5281/zenodo.14642378",
+    "reserve_doi": "https://zenodo.org/api/records/14642378/draft/pids/doi",
+    "parent": "https://zenodo.org/api/records/8327264",
+    "parent_html": "https://zenodo.org/records/8327264",
+    "parent_doi": "https://doi.org/10.5281/zenodo.8327264",
+    "parent_doi_html": "https://zenodo.org/doi/10.5281/zenodo.8327264",
+    "self_iiif_manifest": "https://zenodo.org/api/iiif/record:14642378/manifest",
+    "self_iiif_sequence": "https://zenodo.org/api/iiif/record:14642378/sequence/default",
+    "files": "https://zenodo.org/api/records/14642378/files",
+    "media_files": "https://zenodo.org/api/records/14642378/media-files",
+    "archive": "https://zenodo.org/api/records/14642378/files-archive",
+    "archive_media": "https://zenodo.org/api/records/14642378/media-files-archive",
+    "latest": "https://zenodo.org/api/records/14642378/versions/latest",
+    "latest_html": "https://zenodo.org/records/14642378/latest",
+    "versions": "https://zenodo.org/api/records/14642378/versions",
+    "draft": "https://zenodo.org/api/records/14642378/draft",
+    "access_links": "https://zenodo.org/api/records/14642378/access/links",
+    "access_grants": "https://zenodo.org/api/records/14642378/access/grants",
+    "access_users": "https://zenodo.org/api/records/14642378/access/users",
+    "access_request": "https://zenodo.org/api/records/14642378/access/request",
+    "access": "https://zenodo.org/api/records/14642378/access",
+    "communities": "https://zenodo.org/api/records/14642378/communities",
+    "communities-suggestions": "https://zenodo.org/api/records/14642378/communities-suggestions",
+    "request_deletion": "https://zenodo.org/api/records/14642378/request-deletion",
+    "file_modification": "https://zenodo.org/api/records/14642378/file-modification",
+    "quota_increase": "https://zenodo.org/api/records/14642378/quota-increase",
+    "requests": "https://zenodo.org/api/records/14642378/requests"
+  },
+  "updated": "2025-01-14T03:09:29.919515+00:00",
+  "recid": "14642378",
+  "revision": 4,
+  "files": [
+    {
+      "id": "79995600-9479-4bf1-81f9-d7a0d61ebacf",
+      "key": "GOFER.zip",
+      "size": 75711678,
+      "checksum": "md5:8d495af1e4a0ed77df35b5a15d5ebb04",
+      "links": {
+        "self": "https://zenodo.org/api/records/14642378/files/GOFER.zip/content"
+      }
+    }
+  ],
+  "swh": {},
+  "owners": [
+    {
+      "id": "603083"
+    }
+  ],
+  "status": "published",
+  "stats": {
+    "downloads": 567,
+    "unique_downloads": 444,
+    "views": 1792,
+    "unique_views": 1612,
+    "version_downloads": 307,
+    "version_unique_downloads": 206,
+    "version_unique_views": 722,
+    "version_views": 832
+  },
+  "state": "done",
+  "submitted": true
+}

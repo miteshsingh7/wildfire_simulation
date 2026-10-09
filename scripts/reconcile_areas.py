@@ -75,16 +75,27 @@ def reconcile_areas() -> dict[str, pd.DataFrame]:
         with rasterio.open(c2f_raster_path) as src:
             c2f_arr = src.read(1)
 
-    # Observed estimates:
-    # +3h (09:30 PST): ~6,000 ha (NIST / CAL FIRE initial reports)
-    # +6h (12:30 PST): ~16,000 ha
-    # +12h (18:30 PST): ~22,000 ha (IBHS / Maranghides et al., 2021)
-    # Final (Day 17 contained): ~62,053 ha (153,336 acres CAL FIRE final perimeter)
-    observed_data = {
-        3.0: {"ha": 6000.0, "source": "CAL FIRE / NIST prelim"},
-        6.0: {"ha": 16000.0, "source": "CAL FIRE / NIST active front"},
-        12.0: {"ha": 22000.0, "source": "IBHS (Maranghides et al., 2021)"},
-        "Final": {"ha": 62053.0, "source": "CAL FIRE Final Incident Report"},
+    # Observed perimeter data directly extracted from GeoMAC shapefile records:
+    # No aerial perimeters exist in GeoMAC for +3h (09:30 PST) or +6h (12:30 PST).
+    # First recorded perimeter is ID 1052 (IR overflight at 17:54 PST = +11.4h post-ignition): 22,090.28 ha.
+    # Final containment perimeter is ID 1398 (Day 17 contained): 62,052.72 ha.
+    observed_perimeters = {
+        3.0: {
+            "ha": np.nan,
+            "source": "No observation (no GeoMAC flight between 06:30-09:30 PST)",
+        },
+        6.0: {
+            "ha": np.nan,
+            "source": "No observation (no GeoMAC flight between 06:30-12:30 PST)",
+        },
+        11.4: {
+            "ha": 22090.28,
+            "source": "GeoMAC IR Overflight 2018-11-08 17:54 PST (ID 1052)",
+        },
+        12.0: {
+            "ha": 22090.28,
+            "source": "GeoMAC IR Overflight 2018-11-08 17:54 PST (+11.4h ~ 12h, ID 1052)",
+        },
     }
 
     horizon_comparison = []
@@ -101,8 +112,8 @@ def reconcile_areas() -> dict[str, pd.DataFrame]:
             c2f_cells = 0
             c2f_ha = 0.0
 
-        obs_ha = observed_data[h_hours]["ha"]
-        over_prediction_ratio = pt_ha / obs_ha
+        obs_ha = observed_perimeters[h_hours]["ha"]
+        over_prediction_ratio = (pt_ha / obs_ha) if not np.isnan(obs_ha) else np.nan
 
         horizon_comparison.append({
             "horizon": f"+{int(h_hours)} h ({int(t_limit)} min)",
@@ -111,7 +122,7 @@ def reconcile_areas() -> dict[str, pd.DataFrame]:
             "pytorchfire_pct_domain": pt_pct_domain,
             "cell2fire_ha": c2f_ha,
             "observed_ha": obs_ha,
-            "observed_source": observed_data[h_hours]["source"],
+            "observed_source": observed_perimeters[h_hours]["source"],
             "pt_overprediction_ratio": over_prediction_ratio,
         })
 
@@ -127,7 +138,7 @@ def reconcile_areas() -> dict[str, pd.DataFrame]:
         "burnable_ha": burnable_ha,
         "unburnable_cells": unburnable_count,
         "unburnable_pct": unburnable_pct,
-        "observed_final_camp_fire_ha": 62053.0,
+        "observed_final_camp_fire_ha": 62052.72,
     }])
 
     return {

@@ -245,13 +245,14 @@ Evaluates raster overlap against official GeoMAC infrared and containment perime
 
 | Reference Perimeter | Timestamp (UTC) | Sim Horizon | Engine | Obs Area in Domain (ha) | Sim Area (ha) | TP (Cells) | FP (Cells) | FN (Cells) | TN (Cells) | IoU | Precision | Recall | F1 Score |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **+3.5 h GeoMAC IR Flight** | 2018-11-08 17:54 | 210 min | **PyTorchFire** | 22,155.8 | 10,696.9 | 38,987 | 79,867 | 207,188 | 941,830 | **0.1196** | 0.3280 | 0.1584 | 0.2136 |
-| +3.5 h GeoMAC IR Flight | 2018-11-08 17:54 | 210 min | **Cell2Fire** | 22,155.8 | 4.0 | 44 | 0 | 246,131 | 1,021,697 | **0.0002** | 1.0000 | 0.0002 | 0.0004 |
-| **+9.5 h GeoMAC Evening** | 2018-11-09 00:00 | 570 min | **PyTorchFire** | 27,871.9 | 68,100.7 | 161,934 | 594,740 | 147,754 | 363,444 | **0.1790** | 0.2140 | 0.5229 | 0.3037 |
-| +9.5 h GeoMAC Evening | 2018-11-09 00:00 | 570 min | **Cell2Fire** | 27,871.9 | 24.1 | 267 | 1 | 309,421 | 958,183 | **0.0009** | 0.9963 | 0.0009 | 0.0017 |
+| **+11.4 h GeoMAC IR Overflight** | 2018-11-09 01:54 | 684 min | **PyTorchFire** | 22,155.8 | 86,727.1 | 210,080 | 753,554 | 36,095 | 268,143 | **0.2101** | 0.2180 | **0.8534** | 0.3473 |
+| +11.4 h GeoMAC IR Overflight | 2018-11-09 01:54 | 684 min | **Cell2Fire** | 22,155.8 | 32.8 | 353 | 11 | 245,822 | 1,021,686 | **0.0014** | 0.9698 | 0.0014 | 0.0029 |
+| **+11.4 h Obs vs +12 h Sim** | 2018-11-09 01:54 | 720 min | **PyTorchFire** | 22,155.8 | 91,146.4 | 221,092 | 791,646 | 25,083 | 230,051 | **0.2130** | 0.2183 | **0.8981** | 0.3512 |
+| +11.4 h Obs vs +12 h Sim | 2018-11-09 01:54 | 720 min | **Cell2Fire** | 22,155.8 | 32.8 | 353 | 11 | 245,822 | 1,021,686 | **0.0014** | 0.9698 | 0.0014 | 0.0029 |
 | **Final-Footprint Overlap** | 2018-11-25 18:22 | 720 min | **PyTorchFire** | 58,568.5 | 91,146.4 | 537,961 | 474,777 | 112,800 | 142,334 | **0.4780** | 0.5312 | **0.8267** | **0.6468** |
 | Final-Footprint Overlap | 2018-11-25 18:22 | 720 min | **Cell2Fire** | 58,568.5 | 32.8 | 364 | 0 | 650,397 | 617,111 | **0.0006** | 1.0000 | 0.0006 | 0.0011 |
 
+*Note: GeoMAC contains zero observation flights between 06:30 and 17:54 PST on Day 1. The earliest observation perimeter is ID 1052 (documented in NIST TN 2135 p. 127 as beginning at 17:54 PST / 01:54 UTC Nov 9, +11.4h post-ignition). Hand-typed intermediate estimates have been deleted.*  
 *Script: `scripts/evaluate_perimeters.py` $\to$ `reports/perimeter_evaluation_confusion.csv`.*
 
 ---
@@ -266,18 +267,20 @@ Evaluates raster overlap against official GeoMAC infrared and containment perime
 An exhaustive pixel analysis of `data/tiles/fbfm40.tif` reveals:
 - **Burnable Cells**: 1,215,435 cells (**95.86%** of domain; $109,389.15\text{ ha}$).
 - **Unburnable Cells**: 52,437 cells (**4.14%** of domain; $4,719.33\text{ ha}$).
-  - *Urban / Developed (Code 91)*: 32,284 cells ($2,905.56\text{ ha}$, $2.55\%$).
-  - *Open Water (Code 98)*: 19,101 cells ($1,719.09\text{ ha}$, $1.51\%$).
-  - *Barren / Rock Outcrop (Code 99)*: 1,052 cells ($94.68\text{ ha}$, $0.08\%$).
+  - *Urban / Developed (Code 91)*: 25,840 cells ($2,325.60\text{ ha}$, $2.04\%$).
+  - *Open Water (Code 98)*: 15,336 cells ($1,380.24\text{ ha}$, $1.21\%$).
+  - *Barren / Rock Outcrop (Code 99)*: 11,106 cells ($999.54\text{ ha}$, $0.88\%$).
+  - *Agriculture (Code 93)*: 155 cells ($13.95\text{ ha}$, $0.01\%$).
 
 ### Simulated vs Observed Area Progression
 
 | Horizon | PyTorchFire Cells | PyTorchFire Area (ha) | PyTorchFire % Domain | Cell2Fire Area (ha) | Observed Area (ha) | Observed Source | PyTorchFire Ratio |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **+3 h (180 min)** | 88,406 | 7,956.5 | 6.97% | 4.0 | ~6,000.0 | CAL FIRE / NIST prelim | $1.33\times$ |
-| **+6 h (360 min)** | 351,469 | 31,632.2 | 27.72% | 12.4 | ~16,000.0 | CAL FIRE / NIST active front | $1.98\times$ |
-| **+12 h (720 min)** | 1,012,738 | 91,146.4 | 79.88% | 32.8 | ~22,000.0 | IBHS (Maranghides et al., 2021) | $4.14\times$ |
-| **Final Contained** | — | — | — | — | 62,053.0 | CAL FIRE Final Incident Report | — |
+| **+3 h (180 min)** | 88,406 | 7,956.5 | 6.97% | 4.0 | *No observation* | No GeoMAC flight (06:30-09:30 PST) | — |
+| **+6 h (360 min)** | 351,469 | 31,632.2 | 27.72% | 12.4 | *No observation* | No GeoMAC flight (06:30-12:30 PST) | — |
+| **+11.4 h (684 min)**| 963,634 | 86,727.1 | 75.98% | 32.8 | 22,090.3 | GeoMAC IR Flight 17:54 PST (ID 1052)| $3.93\times$ |
+| **+12 h (720 min)** | 1,012,738 | 91,146.4 | 79.88% | 32.8 | 22,090.3 | GeoMAC IR Flight (+11.4h ~ 12h, ID 1052)| $4.13\times$ |
+| **Final Contained** | — | — | — | — | 62,052.7 | GeoMAC Final Contained (ID 1398) | — |
 
 *Script: `scripts/reconcile_areas.py` $\to$ `reports/area_reconciliation.csv`.*
 
@@ -352,14 +355,14 @@ Using high-frequency `psutil` background polling (every 20 ms) capturing the ent
 The diagnostic investigation capped at 2 hours verified 5 fundamental structural failure modes (`scripts/cell2fire_diagnostic.py`):
 
 1. **Ignition Cell Fuel Code & Snapping**: Raw Pulga coordinates fall on cell (row 538, col 872) classified as FBFM40 91 (Non-fuel). If unsnapped, Cell2Fire aborts immediately with 0 burned cells. Snapping to row 535, col 869 (FBFM40 102 GR2 / FBP O-1b) was required to allow ignition.
-2. **Fuel System Architecture Mismatch**: Cell2Fire C++ natively implements the 18 Canadian Forest Fire Behavior Prediction (FBP) fuel types (C1–C7, D1–D2, M1–M4, S1–S3, O1a–O1b). It possesses **zero native support** for the US Scott & Burgan 40 Rothermel fuel models. Approximating chaparral (SH5) as ponderosa pine (C-7) completely distorts spread dynamics.
+2. **Fuel System Architecture in Current Release**: Cell2Fire C++ natively implements the 18 Canadian Forest Fire Behavior Prediction (FBP) fuel types (C1–C7, D1–D2, M1–M4, S1–S3, O1a–O1b). A code and CLI audit confirmed that this release does not expose an off-the-shelf flag or mode to configure US Scott & Burgan 40 Rothermel fuel models natively. Approximating chaparral (SH5) as ponderosa pine (C-7) distorts spread dynamics.
 3. **Grass Fuel Load Requirement**: In Canadian FBP, grass models O-1a/O-1b require an explicit `gfl` column in `Data.csv`. Defaulting `gfl` to 0.0 results in 0.0 surface fuel consumption and 0.0 rate of spread. Fixed by injecting $0.35\text{ kg/m}^2$.
 4. **Wind Speed Units & Direction**: Cell2Fire expects wind in **km/h** (not m/s or mph) and direction as meteorological azimuth from North (0–360°). Verified and properly converted in input generation.
 5. **Feather River Canyon Barrier Stalling**: Pure contact elliptical spread without ember spotting halted after burning 32.8 ha (364 cells) upon encountering non-burnable river and highway pixels.
 
 ### Formal Engine Status:
-> **Cell2Fire is declared: "NOT FAIRLY EVALUATED (ENGINE DISQUALIFIED)"**  
-> Cell2Fire cannot serve as an off-the-shelf physics teacher for US wildfire environments without a complete architectural overhaul of its C++ fuel behavior core to support Rothermel FBFM40 equations and the addition of an ember spotting engine. Cell2Fire integration is formally terminated.
+> **Cell2Fire status: "Not evaluated under native FBFM40; deprioritized"**  
+> Cell2Fire in this release only executes under Canadian FBP fuel types and lacks an off-the-shelf configuration mode for native US Scott & Burgan / Rothermel 40 fuel models. Rather than undertaking C++ core modifications to integrate Rothermel equations and spotting, Cell2Fire is deprioritized in favor of PyTorchFire.
 
 ---
 
@@ -425,5 +428,5 @@ All figures, metrics, and tables in this Phase 0.5 audit are 100% reproducible v
 
 ## 10. Evaluative Verdict on the Physics Teacher
 
-**Verdict**: PyTorchFire's contact-spread timing is **fundamentally sound and calibratable for contiguous vegetative propagation**, exhibiting a coherent, monotonic physical front with an early-arrival error of only ~1.1 hours at Magalia (65 minutes) and ~1.3 hours at Concow (+80 minutes) once canyon topography funneling is established. However, its uncalibrated contact spread severely over-predicts late-time macro area (burning 79.9% of the domain vs 19.3% observed at 12 hours) due to the absence of dynamic fuel moisture extinction, while exhibiting an acute 4-hour temporal lag (+241.5 minute bias) on spot fires due to the lack of long-range ember lofting. Calibrating the contact spread propagation coefficients ($p_{\text{veg}}, c_1, c_2$) and pairing it with the deferred Phase 1B ember spotting kernel will resolve both discrepancies, confirming PyTorchFire as a viable, computationally efficient, and hardware-accelerated physics teacher for wf052.
+**Verdict**: PyTorchFire's contact-spread timing exhibits a coherent, monotonic physical front with an early-arrival error of only ~1.1 hours at Magalia (65 minutes) and ~1.3 hours at Concow (+80 minutes) once canyon topography funneling is established. However, whether this contact spread is **calibratable** remains an **empirical hypothesis** that must be rigorously tested on other training fires, because on the uncalibrated Camp Fire it severely over-predicts late-time macro area (burning 79.9% of the domain vs 19.3% observed at 11.4 hours) due to the absence of dynamic fuel moisture extinction, and exhibits an acute 4-hour temporal lag (+241.5 minute bias) on spot fires due to the lack of long-range ember lofting. Since the 2018 Camp Fire is strictly **HELD OUT** from calibration, this hypothesis will be tested by fitting differentiable parameters on separate training fires and evaluating whether contact spread timing and burned areas transfer without overfitting.
 
