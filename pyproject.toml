@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=84.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wf052"
+version = "0.1.0"
+description = "Wildfire spread simulation and agentic evacuation-route planner (research demo, PyTorch)"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+authors = [
+    { name = "Mitesh Singh", email = "miteshsingh22222@gmail.com" }
+]
+dependencies = [
+    "torch==2.14.1",
+    "torchvision==0.29.1",
+    "numpy==2.4.6",
+    "pyyaml==6.0.3",
+    "pydantic==2.14.0",
+    "rasterio==1.4.4",
+    "geopandas==1.2.0",
+    "pyarrow==25.0.1",
+    "zarr==3.1.6",
+    "pandas==3.0.6",
+    "shapely==2.2.0",
+    "pyproj==3.7.2",
+    "networkx==3.6.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = []
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
