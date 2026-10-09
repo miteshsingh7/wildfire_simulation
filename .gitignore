@@ -39,9 +39,9 @@ env/
 .DS_Store
 
 # Data, model checkpoints, and logs
-data/
-checkpoints/
-logs/
+/data/
+/checkpoints/
+/logs/
 *.geotiff
 *.tif
 *.zarr
