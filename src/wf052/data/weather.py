@@ -38,6 +38,7 @@ def fetch_raws_jarbo_gap(date_str: str = "2018-11-08") -> pd.DataFrame:
     resp.raise_for_status()
 
     from io import StringIO
+
     df = pd.read_csv(StringIO(resp.text))
     # Standardize columns
     # TAIRGZ: Temp (F), XRIRGZ: RH (%), USIRGZ: Wind Speed (mph),

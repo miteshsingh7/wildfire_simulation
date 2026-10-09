@@ -34,6 +34,7 @@ def download_or_load_nist_report(raw_dir: Path) -> Path:
     tmp_path = Path("/tmp/NIST.TN.2135.pdf")
     if tmp_path.exists() and tmp_path.stat().st_size > 10_000_000:
         import shutil
+
         shutil.copy(tmp_path, pdf_path)
         return pdf_path
 
@@ -87,17 +88,19 @@ def parse_nist_appendix_f(pdf_path: Path) -> gpd.GeoDataFrame:
                     elapsed_min = (th + 24 - base_hour) * 60 + (tm - base_min)
 
                 utm_x, utm_y = transformer.transform(lon, lat)
-                records.append({
-                    "date": date_str,
-                    "time": time_str,
-                    "elapsed_minutes": elapsed_min,
-                    "latitude": lat,
-                    "longitude": lon,
-                    "utm_x": utm_x,
-                    "utm_y": utm_y,
-                    "geometry": Point(lon, lat),
-                    "page": page_idx + 1,
-                })
+                records.append(
+                    {
+                        "date": date_str,
+                        "time": time_str,
+                        "elapsed_minutes": elapsed_min,
+                        "latitude": lat,
+                        "longitude": lon,
+                        "utm_x": utm_x,
+                        "utm_y": utm_y,
+                        "geometry": Point(lon, lat),
+                        "page": page_idx + 1,
+                    }
+                )
 
     gdf = gpd.GeoDataFrame(records, crs="EPSG:4326")
     return gdf

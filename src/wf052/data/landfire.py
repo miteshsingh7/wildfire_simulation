@@ -97,6 +97,7 @@ def align_and_save_layer(
     rows, cols = grid["rows"], grid["cols"]
     if data.shape != (rows, cols):
         from scipy.ndimage import zoom
+
         zoom_y = rows / data.shape[0]
         zoom_x = cols / data.shape[1]
         order = 0 if layer_name == "fbfm40" else 1
