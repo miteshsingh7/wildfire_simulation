@@ -1,0 +1,3 @@
+engine,runtime_sec,peak_tree_ram_mb,parent_ram_mb,children_ram_mb,monitoring_method
+PyTorchFire,60.671456625219434,373.03125,373.03125,0.0,psutil process tree (parent + children recursive @ 20ms)
+Cell2Fire,7.0032109171152115,1247.515625,25.25,1222.265625,psutil process tree (parent + children recursive @ 20ms)

@@ -1,0 +1,5 @@
+location,fbfm_code,observed_earliest_min,observed_clock_pst,earliest_obs_type,pytorchfire_arrival_exact,pytorchfire_arrival_500m,pytorchfire_arrival_1000m,pytorchfire_best_arrival,pytorchfire_error_min,cell2fire_arrival
+Concow (Rim Rd / Concow Rd),91,20.0,06:45 PST,other,,100.0,84.0,100.0,80.0,
+Paradise East Edge (Pentz Rd / Bille Rd),91,87.0,07:52 PST,spot_fire,,374.0,358.0,374.0,287.0,
+Paradise Core (Skyway / Wagstaff Rd),91,119.0,08:24 PST,spot_fire,,453.0,437.0,453.0,334.0,
+Magalia (Skyway / Coutolenc Rd),185,381.0,12:46 PST,vegetative,446.0,429.0,413.0,446.0,65.0,

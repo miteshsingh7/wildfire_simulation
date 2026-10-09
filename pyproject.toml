@@ -25,6 +25,7 @@ dependencies = [
     "shapely==2.2.0",
     "pyproj==3.7.2",
     "networkx==3.6.1",
+    "psutil==7.2.2",
 ]
 
 [project.optional-dependencies]
@@ -51,7 +52,9 @@ select = [
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
 ]
-ignore = []
+ignore = [
+    "E501",  # line length handled by ruff format / long URLs
+]
 
 [tool.pytest.ini_options]
 minversion = "9.0"

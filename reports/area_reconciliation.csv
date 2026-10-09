@@ -1,0 +1,4 @@
+horizon,pytorchfire_cells,pytorchfire_ha,pytorchfire_pct_domain,cell2fire_ha,observed_ha,observed_source,pt_overprediction_ratio
++3 h (180 min),88406,7956.54,6.972785896368087,3.96,6000.0,CAL FIRE / NIST prelim,1.32609
++6 h (360 min),351469,31632.21,27.721173746245675,12.42,16000.0,CAL FIRE / NIST active front,1.977013125
++12 h (720 min),1012738,91146.42,79.8769907372353,32.76,22000.0,"IBHS (Maranghides et al., 2021)",4.143019090909091
