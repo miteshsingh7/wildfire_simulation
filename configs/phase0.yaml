@@ -1,0 +1,79 @@
+# Configuration for Phase 0: Feasibility Spike on 2018 Camp Fire
+domain:
+  name: "camp_fire_2018"
+  crs: "EPSG:32610"
+  resolution: 30.0
+  bbox_utm:
+    x_min: 607230.0
+    x_max: 640950.0
+    y_min: 4389660.0
+    y_max: 4423500.0
+  bbox_wgs84:
+    lon_min: -121.750163
+    lon_max: -121.349998
+    lat_min: 39.650017
+    lat_max: 39.949900
+  grid:
+    rows: 1128
+    cols: 1124
+
+event:
+  name: "Camp Fire"
+  county: "Butte County, CA"
+  ignition:
+    name: "Pulga"
+    lon: -121.4391
+    lat: 39.8058
+    utm_x: 633391.0
+    utm_y: 4407338.0
+    time_utc: "2018-11-08T14:33:00Z"
+    time_local: "2018-11-08T06:33:00-08:00"
+  simulation:
+    duration_hours: 12
+    time_step_minutes: 60
+
+data:
+  raw_dir: "data/raw"
+  tiles_dir: "data/tiles"
+  landfire:
+    product: "LF_2016_Remap" # Pre-fire fuels (LF 2016 Remap / LF 2.0.0, strictly avoiding 2023/2024 burn-scar leakage)
+    layers:
+      - "fbfm40"
+      - "elevation"
+      - "slope"
+      - "aspect"
+      - "canopy_cover"
+      - "canopy_height"
+      - "canopy_base_height"
+      - "canopy_bulk_density"
+  weather:
+    source: "HRRR"
+    date: "2018-11-08"
+    start_hour_utc: 14
+    duration_hours: 12
+    variables:
+      - "u10"
+      - "v10"
+      - "gust"
+      - "t2m"
+      - "rh"
+    validation_raws:
+      station_id: "JARC1" # Jarbo Gap RAWS
+      lon: -121.4686
+      lat: 39.8139
+  observations:
+    nist: "NIST_TN2135_AppendixF"
+    gofer: "GOFER_hourly"
+    feds: "FEDS_VIIRS_12h"
+  roads:
+    date_snapshot: "2018-11-01"
+    network_type: "drive"
+
+engines:
+  seeds: [42, 101, 202, 303, 404, 505, 606, 707, 808, 909]
+  pytorchfire:
+    steps_per_hour: 60
+  cell2fire:
+    fire_period_length: 60
+    sim_years: 1
+    nsims: 1
