@@ -19,3 +19,14 @@ def test_pytorch_available() -> None:
     assert tensor.shape == (2, 2)
     assert "tensorflow" not in sys.modules
     assert "keras" not in sys.modules
+
+
+def test_seed_and_versions() -> None:
+    """Verify reproducible seed utility and environment version collection."""
+    from wf052.utils import get_environment_versions, seed_everything
+
+    seed_everything(123)
+    versions = get_environment_versions()
+    assert "torch" in versions
+    assert "numpy" in versions
+    assert "python" in versions
