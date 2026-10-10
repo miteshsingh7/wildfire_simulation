@@ -1,0 +1,21 @@
+split,model,fire_type,evaluation_role,total_points,burned_points,unburned_points,never_burned_pct,signed_bias_mean_min,signed_bias_median_min,abs_error_mae_min,abs_error_median_min
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),vegetative,contact_spread_target,315,4,311,98.73015873015873,12.25,11.0,12.25,11.0
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),spot_fire,reported_not_tuned,341,2,339,99.41348973607037,51.0,51.0,51.0,51.0
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),structural,reported_not_tuned,629,0,629,100.0,,,,
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),other,reported_not_tuned,1081,7,1074,99.35245143385754,5.714285714285714,8.0,28.857142857142858,35.0
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),ALL,aggregate,2366,13,2353,99.45054945054946,14.692307692307692,13.0,27.153846153846153,25.0
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),vegetative,contact_spread_target,315,20,295,93.65079365079364,101.55,87.5,110.15,87.5
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),spot_fire,reported_not_tuned,341,3,338,99.12023460410558,7.0,-1.0,8.333333333333334,1.0
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),structural,reported_not_tuned,629,2,627,99.68203497615262,108.5,108.5,108.5,108.5
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),other,reported_not_tuned,1081,17,1064,98.42738205365403,20.941176470588236,-9.0,57.411764705882355,29.0
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),ALL,aggregate,2366,42,2324,98.22485207100591,62.5,11.0,81.45238095238095,35.0
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),vegetative,contact_spread_target,315,184,131,41.58730158730159,82.0163043478261,86.0,148.9836956521739,130.0
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),spot_fire,reported_not_tuned,341,174,167,48.97360703812317,245.8735632183908,265.5,258.2183908045977,269.0
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),structural,reported_not_tuned,629,172,457,72.65500794912559,81.17441860465117,88.5,125.63953488372093,104.0
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),other,reported_not_tuned,1081,405,676,62.534690101757626,126.59506172839507,158.0,170.85185185185185,181.0
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),ALL,aggregate,2366,935,1431,60.481825866441255,131.66417112299465,156.0,174.48983957219252,182.0
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),vegetative,contact_spread_target,315,178,137,43.492063492063494,68.29775280898876,54.0,146.9943820224719,126.0
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),spot_fire,reported_not_tuned,341,170,171,50.146627565982406,242.98823529411766,266.0,257.2705882352941,268.0
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),structural,reported_not_tuned,629,165,464,73.76788553259142,75.19393939393939,84.0,126.78181818181818,99.0
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),other,reported_not_tuned,1081,415,666,61.609620721554116,119.97590361445783,153.0,168.56385542168675,179.0
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),ALL,aggregate,2366,928,1438,60.777683854606934,124.63577586206897,148.0,173.24784482758622,181.0

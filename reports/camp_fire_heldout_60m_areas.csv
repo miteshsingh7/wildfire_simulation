@@ -1,0 +1,17 @@
+split,model,horizon,horizon_min,sim_burned_cells_60m,sim_burned_area_ha,obs_area_in_domain_ha,obs_source,sim_obs_ratio
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),+3.0 h,180.0,3666,1319.76,,No observation,
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),+6.0 h,360.0,3918,1410.48,,No observation,
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),+11.4 h,684.0,3918,1410.48,22156.2,GeoMAC IR Flight (ID 1052),0.06366073604679502
+held-out (Camp Fire 2018),teacher_v1 (Frozen All-7),+12.0 h,720.0,3918,1410.48,22156.2,GeoMAC IR Flight (+11.4h ref),0.06366073604679502
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),+3.0 h,180.0,4038,1453.6799999999998,,No observation,
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),+6.0 h,360.0,5080,1828.8,,No observation,
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),+11.4 h,684.0,8276,2979.3599999999997,22156.2,GeoMAC IR Flight (ID 1052),0.13447071248679826
+held-out (Camp Fire 2018),wind_only_v1 (Frozen Wind-3),+12.0 h,720.0,8497,3058.92,22156.2,GeoMAC IR Flight (+11.4h ref),0.1380615809570233
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),+3.0 h,180.0,22431,8075.16,,No observation,
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),+6.0 h,360.0,86069,30984.84,,No observation,
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),+11.4 h,684.0,233432,84035.52,22156.2,GeoMAC IR Flight (ID 1052),3.792867007880413
+held-out (Camp Fire 2018),uncalibrated_default (p_base=0.50),+12.0 h,720.0,247056,88940.16,22156.2,GeoMAC IR Flight (+11.4h ref),4.014233487691933
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),+3.0 h,180.0,24830,8938.8,,No observation,
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),+6.0 h,360.0,92049,33137.64,,No observation,
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),+11.4 h,684.0,241279,86860.44,22156.2,GeoMAC IR Flight (ID 1052),3.920367210983833
+held-out (Camp Fire 2018),phase0_baseline (p_base=0.58),+12.0 h,720.0,253256,91172.16,22156.2,GeoMAC IR Flight (+11.4h ref),4.114972784141685

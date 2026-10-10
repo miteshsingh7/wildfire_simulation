@@ -1,0 +1,4 @@
+split,landmark,obs_first_ember_min,obs_main_front_min,teacher_v1_arrival_min,teacher_v1_p10_min,teacher_v1_p90_min,wind_only_v1_arrival_min,uncalibrated_arrival_min
+held-out (Camp Fire 2018),Concow (Community Center),60.0,120.0,,488.6000061035156,720.0,392.0,242.0
+held-out (Camp Fire 2018),Paradise East Edge (Pentz Rd),76.0,150.0,,711.0,720.0,,378.0
+held-out (Camp Fire 2018),Magalia (Center / Coutolenc),173.0,300.0,,720.0,720.0,,444.0

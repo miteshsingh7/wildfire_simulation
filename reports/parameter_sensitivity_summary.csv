@@ -1,0 +1,19 @@
+parameter,default,fire_name,min_area_24h_ha,max_area_24h_ha,rel_area_swing_24h_pct,min_mae_24h_min,max_mae_24h_min,mae_swing_24h_min,description
+p_base,0.5,Kincade,1026.4,146045.9,103.3,304.0,1080.5,776.5,Base propagation probability (p_h / P_base)
+p_base,0.5,Bobcat,483.5,135487.8,100.2,516.7,826.3,309.6,Base propagation probability (p_h / P_base)
+a,0.06,Kincade,130606.9,143064.0,8.9,303.1,315.0,11.9,Topographic slope scaling factor exp(a * slope_deg)
+a,0.06,Bobcat,133697.9,135677.2,1.5,518.3,522.2,3.9,Topographic slope scaling factor exp(a * slope_deg)
+c_1,0.045,Kincade,132088.0,145544.0,9.6,304.6,317.4,12.8,Isotropic wind velocity scaling factor exp(c_1 * V)
+c_1,0.045,Bobcat,134612.6,135068.8,0.3,520.9,521.2,0.3,Isotropic wind velocity scaling factor exp(c_1 * V)
+c_2,0.15,Kincade,6563.9,146909.5,100.0,300.0,672.0,372.0,Wind directional eccentricity / flank suppression exp(c_2 * V * (cos(theta) - 1))
+c_2,0.15,Bobcat,97677.4,135188.6,27.8,520.4,521.9,1.5,Wind directional eccentricity / flank suppression exp(c_2 * V * (cos(theta) - 1))
+p_continue,0.3,Kincade,137160.7,143663.8,4.6,298.1,317.3,19.2,Probability a burning cell continues burning at next step
+p_continue,0.3,Bobcat,134156.5,135573.8,1.1,520.6,521.6,1.0,Probability a burning cell continues burning at next step
+fuel_scale_grass_shrub,1.0,Kincade,131332.3,141557.0,7.3,303.5,312.7,9.2,Multiplier on p_veg for Grass & Shrub fuel models (FBFM40 101-147)
+fuel_scale_grass_shrub,1.0,Bobcat,134125.2,134951.8,0.6,521.0,521.3,0.3,Multiplier on p_veg for Grass & Shrub fuel models (FBFM40 101-147)
+fuel_scale_timber,1.0,Kincade,135340.9,141906.6,4.7,307.6,312.6,5.0,Multiplier on p_veg for Timber & Slash fuel models (FBFM40 161-204)
+fuel_scale_timber,1.0,Bobcat,134736.5,134769.6,0.0,520.7,521.1,0.4,Multiplier on p_veg for Timber & Slash fuel models (FBFM40 161-204)
+canopy_den_scale,1.0,Kincade,131301.7,142553.2,8.0,305.5,313.7,8.2,Multiplier on canopy cover density modifier p_den
+canopy_den_scale,1.0,Bobcat,133937.6,135106.6,0.9,521.0,521.5,0.5,Multiplier on canopy cover density modifier p_den
+wind_moisture_damping,0.0,Kincade,140402.5,140412.6,0.0,312.6,312.6,0.0,Time-varying RH wind/moisture damping coefficient gamma_rh
+wind_moisture_damping,0.0,Bobcat,134392.0,134769.6,0.3,521.0,521.0,0.0,Time-varying RH wind/moisture damping coefficient gamma_rh

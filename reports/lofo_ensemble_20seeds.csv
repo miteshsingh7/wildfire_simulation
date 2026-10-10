@@ -1,0 +1,8 @@
+fire_name,regime,split,num_seeds,obs_area_12h_ha,ens_area_12h_mean_ha,ens_area_12h_std_ha,ens_iou_12h_mean,ens_iou_12h_std,ens_f1_12h_mean,ens_p50_arrival_mae_min,ens_p10_p90_width_min,p10_p90_raw_coverage_pct,p10_p90_hourly_quantized_coverage_pct
+Kincade,wind-driven,held-out (LOFO),20,11621.9,7476.6,3601.4,0.389,0.0813,0.555,247.2,365.3,34.38,46.05
+Bobcat,plume,held-out (LOFO),20,3631.3,57763.5,3160.8,0.0701,0.004,0.131,284.5,78.9,10.16,11.13
+Glass,wind-driven,held-out (LOFO),20,22824.4,32924.3,3370.2,0.4175,0.0385,0.588,188.0,223.6,37.19,45.87
+Creek,plume,held-out (LOFO),20,16735.7,26084.8,3105.8,0.4051,0.0548,0.5744,286.0,235.9,42.27,44.57
+Zogg,wind-driven,held-out (LOFO),20,12677.8,2798.9,1925.8,0.1315,0.0525,0.2286,426.6,324.4,32.71,42.81
+Caldor,terrain,held-out (LOFO),20,11385.4,95648.2,2274.4,0.128,0.003,0.2269,182.6,61.4,8.94,16.33
+Tamarack,terrain,held-out (LOFO),20,7556.8,25919.0,4723.0,0.1666,0.0331,0.2842,200.0,433.3,74.27,85.67

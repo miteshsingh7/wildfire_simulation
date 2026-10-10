@@ -1,0 +1,2 @@
+split,model,area_11_4h_mean_ha,area_11_4h_std_ha,area_11_4h_p10_ha,area_11_4h_p90_ha,iou_11_4h_mean,iou_11_4h_std,nist_veg_p10_p90_coverage_pct,nist_all_p10_p90_coverage_pct
+held-out (Camp Fire 2018),teacher_v1 (20-Seed Ensemble),1597.9859999999999,1408.6525846936142,209.41199999999998,3016.8360000000002,0.061476132317967516,0.05922156968739475,2.5396825396825395,1.8174133558748946
