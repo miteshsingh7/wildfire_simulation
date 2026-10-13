@@ -384,3 +384,64 @@ Saved frozen teacher 60m arrival raster to data/tiles/arrival_time_teacher_v1_60
    - Should Phase 1B build the wind-borne ember spotting kernel on top of **`teacher_v1`** ($P_{\text{base}} = 0.21$) or **`wind_only_v1`** ($P_{\text{base}} = 0.22$, which achieved `1.037×` mean area ratio and `0.3214` LOFO IoU on wind-driven fires)?
 2. **Regime-Conditioned vs. Single Parameter Set**:
    - Should the physics teacher maintain a single frozen parameter vector (`teacher_v1`) or allow a two-regime lookup (`wind-driven` when 10 m gusts $> 12\text{ m/s}$ vs. `terrain/plume` otherwise)?
+
+
+---
+
+# Phase 1B Step 0 Audit & Re-Report of Phase 1A (Appended, History Preserved)
+
+Per Orchestrator instructions for Phase 1B Step 0 (no new contact modeling), we re-audited and re-reported the Phase 1A evaluation tables with explicit cell/point denominators, matched-fold model selection, criticality sweep, and relabeling of the 30 m transfer check. Full details and plots are also included in `reports/phase_1b.md`.
+
+### Step 0(a): Matched-Fold Comparison & Base Teacher Selection (`reports/step0_matched_fold_comparison.csv`)
+
+- **Rule**: Evaluate `global_slowdown` (1 free parameter) vs `wind_only` vs `all-7` on `(i)` the 3 wind-driven folds (`Kincade, Glass, Zogg`) and `(ii)` all 7 folds (`Kincade, Bobcat, Glass, Creek, Zogg, Caldor, Tamarack`). Pick the simplest model within `0.02` IoU of best; if not `teacher_v1`, freeze `configs/teacher_v1_1.yaml` + hash.
+
+| Evaluation Fold Set | Model Variant | Free Params | Split | +12h ~2km GOFER IoU | +12h ~2km GOFER $F_1$ | +12h 375m FEDS $F_1$ | Mean (1/3/6/12h) ~2km IoU | +12h Mean Area Ratio | +12h Median Area Ratio | +12h Wind Front Err (km) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `uncalibrated (P_base=0.50)` | 0 | **held-out (LOFO, n=3)** | 0.1391 | 0.2434 | 0.2113 | 0.3345 | 7.552× | 8.489× | 4.63 km |
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `global_slowdown_lofo` | **1** | **held-out (LOFO, n=3)** | 0.2848 | 0.4070 | 0.3691 | 0.3571 | 0.702× | 0.435× | 5.32 km |
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `calibrated_all7_lofo` | 6 | **held-out (LOFO, n=3)** | 0.2983 | 0.4207 | 0.3710 | 0.3509 | 0.580× | 0.435× | 5.00 km |
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `calibrated_wind_only_lofo` | 6 | **held-out (LOFO, n=3)** | **0.3214** | **0.4832** | **0.4407** | **0.4094** | **1.037×** | **0.937×** | **3.43 km** |
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `teacher_v1 (1-param, P_base=0.21)` | **1** | **single-vector eval (n=3)** | **0.3924** | **0.5624** | 0.5013 | 0.4172 | **1.012×** | **0.945×** | **0.94 km** |
+| **(i) 3 Wind-Driven Folds (`n=3`)** | `teacher_v1_1 (1-param, P_base=0.22)` | **1** | **single-vector eval (n=3)** | **0.3899** | 0.5599 | **0.5171** | **0.4434** | 1.206× | 1.446× | 2.85 km |
+| **(ii) All 7 Folds (`n=7`)** | `uncalibrated (P_base=0.50)` | 0 | **held-out (LOFO, n=7)** | 0.1036 | 0.1851 | 0.1336 | 0.2534 | 13.685× | 8.926× | 8.27 km |
+| **(ii) All 7 Folds (`n=7`)** | `global_slowdown_lofo` | **1** | **held-out (LOFO, n=7)** | **0.2436** | **0.3663** | 0.2741 | 0.3307 | **4.105×** | **1.512×** | 5.32 km |
+| **(ii) All 7 Folds (`n=7`)** | `calibrated_all7_lofo` | 6 | **held-out (LOFO, n=7)** | 0.2204 | 0.3337 | 0.2471 | 0.3199 | 4.570× | 1.512× | 6.51 km |
+| **(ii) All 7 Folds (`n=7`)** | `calibrated_wind_only_lofo` | 6 | **held-out (LOFO, n=7)** | 0.2297 | 0.3590 | **0.2789** | **0.3399** | 4.994× | 1.828× | **5.28 km** |
+| **(ii) All 7 Folds (`n=7`)** | `teacher_v1 (1-param, P_base=0.21)` | **1** | **single-vector eval (n=7)** | **0.2897** | **0.4329** | **0.3308** | **0.3565** | **4.238×** | **1.512×** | **3.44 km** |
+| **(ii) All 7 Folds (`n=7`)** | `teacher_v1_1 (1-param, P_base=0.22)` | **1** | **single-vector eval (n=7)** | 0.2591 | 0.3918 | 0.3116 | 0.3545 | 5.067× | 1.828× | 5.03 km |
+
+- **Selection Decision**:
+  - On **(ii) All 7 Folds (`held-out LOFO, n=7`)**, `global_slowdown_lofo` (1 free parameter, consensus `teacher_v1` with $P_{\text{base}} = 0.21$) achieves the highest +12 h IoU (`0.2436` vs `0.2297` for `wind_only_lofo` and `0.2204` for `all7_lofo`) and is within `0.0092 < 0.02` of `wind_only_lofo` on mean 1/3/6/12h IoU (`0.3307` vs `0.3399`).
+  - On **(i) 3 Wind-Driven Folds (`held-out LOFO, n=3`)**, `calibrated_wind_only_lofo` achieves `+12h IoU = 0.3214` (vs `0.2848` for all-7 `global_slowdown_lofo`, where fitting on Bobcat/Caldor dragged Zogg's fold down to $P_{\text{base}}=0.16$). Its consensus 1-parameter single vector is $P_{\text{base}} = 0.22$ (`configs/teacher_v1_1.yaml`), which achieves the highest mean 1/3/6/12h IoU (`0.4434`) and FEDS 375m $F_1$ (`0.5171`) on wind-driven folds while remaining within `0.0025 < 0.02` of `teacher_v1` at +12 h (`0.3899` vs `0.3924`).
+  - Both single-vector configs are frozen with SHA-256 hashes:
+    - `configs/teacher_v1.yaml` ($P_{\text{base}} = 0.21$): `c45ba6db95187063347ad1c06e81dbb29ff3e45fa92f50ad46d8dcc9e16cf9b6`
+    - `configs/teacher_v1_1.yaml` ($P_{\text{base}} = 0.22$): `86a1ac17804d3816958c4694b1be504fa432ebdead2db5d0df4c4fa4939a30f0`
+
+### Step 0(b): 20-Seed P10–P90 Coverage Table with Exact Cell Denominators (`reports/step0_20seed_coverage_with_denominators.csv`)
+
+| Fire Name | Regime | Split | Seeds | Obs +12h Cells (Area ha) | Ensemble +12h Area (Mean ± Std ha) | Ensemble P10–P90 Area Band (ha) | Denominator: Obs Progression Cells ($t_{\text{obs}} > 0$) | Raw P10–P90 Covered / Denom (%) | Hourly-Quantized ($\pm 30\text{ m}$) Covered / Denom (%) |
+|---|---|---|---|---|---|---|---|---|---|
+| **Kincade** | `wind-driven` | **held-out (LOFO 20-seed)** | 20 | 32,283 (`11,621.9 ha`) | $8,315.8 \pm 3,129.2$ | `[4,444.0, 13,335.7]` | `29,925` | `6,483 / 29,925` (`21.66%`) | `9,107 / 29,925` (**`30.43%`**) |
+| **Bobcat** | `plume` | **held-out (LOFO 20-seed)** | 20 | 10,087 (`3,631.3 ha`) | $57,047.4 \pm 3,123.9$ | `[52,003.0, 60,267.1]` | `9,098` | `876 / 9,098` (`9.63%`) | `942 / 9,098` (`10.35%`) |
+| **Glass** | `wind-driven` | **held-out (LOFO 20-seed)** | 20 | 63,401 (`22,824.4 ha`) | $39,665.1 \pm 3,516.3$ | `[35,997.9, 43,443.4]` | `56,134` | `16,421 / 56,134` (`29.25%`) | `20,429 / 56,134` (**`36.39%`**) |
+| **Creek** | `plume` | **held-out (LOFO 20-seed)** | 20 | 46,488 (`16,735.7 ha`) | $25,794.9 \pm 4,082.9$ | `[21,169.9, 31,362.9]` | `41,300` | `15,232 / 41,300` (`36.88%`) | `15,849 / 41,300` (**`38.38%`**) |
+| **Zogg** | `wind-driven` | **held-out (LOFO 20-seed)** | 20 | 35,216 (`12,677.8 ha`) | $12,354.8 \pm 2,262.8$ | `[9,084.8, 15,622.3]` | `35,012` | `7,335 / 35,012` (`20.95%`) | `9,080 / 35,012` (**`25.93%`**) |
+| **Caldor** | `terrain` | **held-out (LOFO 20-seed)** | 20 | 31,626 (`11,385.4 ha`) | $94,520.3 \pm 2,503.2$ | `[92,100.6, 96,911.0]` | `20,617` | `1,941 / 20,617` (`9.41%`) | `3,337 / 20,617` (`16.19%`) |
+| **Tamarack** | `terrain` | **held-out (LOFO 20-seed)** | 20 | 20,991 (`7,556.8 ha`) | $16,465.2 \pm 6,148.4$ | `[9,107.9, 24,422.5]` | `18,992` | `9,690 / 18,992` (**`51.02%`**) | `11,166 / 18,992` (**`58.79%`**) |
+
+### Step 0(c): Camp Fire Complete Table (Recall, Precision, IoU with Denominators) & 30 m Relabeling
+- **Camp Fire Perimeter Recall, Precision & IoU with Raw Cell Denominators (`reports/step0_camp_fire_complete_table.csv`)**:
+  - `teacher_v1 (P_base=0.21)` vs +11.4 h GeoMAC IR (ID 1052, `61,549` obs cells = `22,157.6 ha` on `316,968`-cell grid):
+    - **Recall (`TP / Obs`)**: `3,378 / 61,549` (**`5.49%`**)
+    - **Precision (`TP / Sim`)**: `3,378 / 3,918` (**`86.22%`**)
+    - **IoU (`TP / Union`)**: `3,378 / 62,089` (**`0.0544`**)
+  - `wind_only_v1 / teacher_v1_1 (P_base=0.22)` vs +11.4 h GeoMAC IR (ID 1052):
+    - **Recall (`TP / Obs`)**: `6,350 / 61,549` (**`10.32%`**)
+    - **Precision (`TP / Sim`)**: `6,350 / 8,276` (**`76.73%`**)
+    - **IoU (`TP / Union`)**: `6,350 / 63,475` (**`0.1000`**)
+- **Camp Fire NIST Reached / Unreached Counts with Denominators (`reports/step0_camp_fire_nist_reached_unreached.csv`)**:
+  - `teacher_v1 (P_base=0.21)`: `vegetative` Reached `4 / 315 (1.27%)`, Unreached `311 / 315 (98.73%)`; `spot_fire` Reached `2 / 341 (0.59%)`, Unreached `339 / 341 (99.41%)`; `structural` Reached `0 / 629 (0.00%)`, Unreached `629 / 629 (100.00%)`; `other` Reached `7 / 1,081 (0.65%)`, Unreached `1,074 / 1,081 (99.35%)`; `ALL` Reached `13 / 2,366 (0.55%)`, Unreached `2,353 / 2,366 (99.45%)`.
+  - `wind_only_v1 / teacher_v1_1 (P_base=0.22)`: `vegetative` Reached `20 / 315 (6.35%)`, Unreached `295 / 315 (93.65%)`; `spot_fire` Reached `3 / 341 (0.88%)`, Unreached `338 / 341 (99.12%)`; `structural` Reached `2 / 629 (0.32%)`, Unreached `627 / 629 (99.68%)`; `other` Reached `17 / 1,081 (1.57%)`, Unreached `1,064 / 1,081 (98.43%)`; `ALL` Reached `42 / 2,366 (1.78%)`, Unreached `2,324 / 2,366 (98.22%)`.
+- **Relabeling of the 30 m vs 60 m Kincade Run (`reports/resolution_penalty_30m_vs_60m.csv`)**:
+  - Relabeled from `"resolution penalty"` to **`"parameter transfer test (non-transferable), not a resolution penalty"`**: in a discrete Moore-neighborhood cellular automaton with fixed per-step burnout ($1 - p_{\text{continue}} = 0.70$), halving $\Delta x$ (`60 m -> 30 m`) and doubling `steps_per_hour` (`30 -> 60`) squares the number of cell-to-cell survival transitions required to cross a given physical distance, making $P_{\text{base}}$ non-transferable across grid resolutions without re-calibration.

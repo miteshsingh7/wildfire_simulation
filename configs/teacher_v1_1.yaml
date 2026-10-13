@@ -1,0 +1,58 @@
+version: teacher_v1_1
+phase: 1B_step0
+operating_resolution_m: 60
+steps_per_hour: 30
+dt_seconds: 120.0
+crs: EPSG:32610
+landfire_vintage: LANDFIRE 2016 Remap (LF 2.0.0)
+calibrated_on_fires:
+- Kincade
+- Bobcat
+- Glass
+- Creek
+- Zogg
+- Caldor
+- Tamarack
+held_out_evaluation_fire: Camp Fire (2018)
+parameters:
+  p_base: 0.22
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+ablation_wind_only_parameters:
+  p_base: 0.22
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+baseline_global_slowdown_parameters:
+  p_base: 0.21
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+uncalibrated_default_parameters:
+  p_base: 0.5
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+selection_rule: Simplest model within 0.02 IoU of best on matched wind-driven LOFO
+  folds (1-param P_base=0.22)

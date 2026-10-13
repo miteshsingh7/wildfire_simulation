@@ -1,5 +1,5 @@
-fire_name,resolution,grid,steps_per_hour,horizon_h,wall_clock_24h_sec,sim_area_ha,obs_area_ha,area_ratio,gofer_2km_iou,gofer_2km_f1
-Kincade (2019),60 m (Operating),720x720,30,12,2.7090109162963927,5049.72,11621.88,0.43450113062602613,0.4473684210526316,0.6181818181818182
-Kincade (2019),60 m (Operating),720x720,30,24,2.7090109162963927,5529.599999999999,11621.88,0.475792212619645,0.4146341463414634,0.5862068965517241
-Kincade (2019),30 m (Fine Check),1440x1440,60,12,19.110666916705668,3573.9,11621.88,0.30751479106650564,0.2702702702702703,0.425531914893617
-Kincade (2019),30 m (Fine Check),1440x1440,60,24,19.110666916705668,3573.9,11621.88,0.30751479106650564,0.2702702702702703,0.425531914893617
+fire_name,resolution,grid,steps_per_hour,horizon_h,wall_clock_24h_sec,sim_area_ha,obs_area_ha,area_ratio,gofer_2km_iou,gofer_2km_f1,test_type,split
+Kincade (2019),60 m (Operating),720x720,30,12,2.7090109162963927,5049.72,11621.88,0.4345011306260261,0.4473684210526316,0.6181818181818182,"parameter transfer test (non-transferable), not a resolution penalty",in-sample diagnostic (Kincade 2019)
+Kincade (2019),60 m (Operating),720x720,30,24,2.7090109162963927,5529.599999999999,11621.88,0.475792212619645,0.4146341463414634,0.5862068965517241,"parameter transfer test (non-transferable), not a resolution penalty",in-sample diagnostic (Kincade 2019)
+Kincade (2019),30 m (Fine Check),1440x1440,60,12,19.110666916705668,3573.9,11621.88,0.3075147910665056,0.2702702702702703,0.425531914893617,"parameter transfer test (non-transferable), not a resolution penalty",in-sample diagnostic (Kincade 2019)
+Kincade (2019),30 m (Fine Check),1440x1440,60,24,19.110666916705668,3573.9,11621.88,0.3075147910665056,0.2702702702702703,0.425531914893617,"parameter transfer test (non-transferable), not a resolution penalty",in-sample diagnostic (Kincade 2019)
