@@ -110,6 +110,12 @@ class EvacuationDemandModel:
         self.occupancy = float(self.cfg.get("occupancy", {}).get("persons_per_vehicle", 1.6))
         self.time_slice_min = float(self.cfg.get("scenario", {}).get("time_slice_minutes", 5.0))
         self.horizon_min = float(self.cfg.get("scenario", {}).get("total_horizon_minutes", 720.0))
+        self.t0_ignition_utc = str(
+            self.cfg.get("scenario", {}).get(
+                "t0_ignition_utc",
+                self.cfg.get("scenario", {}).get("event_ignition_utc", "2018-11-08T14:33:00Z"),
+            )
+        )
 
         self.zones: dict[str, EvacuationZone] = {}
         self.departure_schedules: dict[str, dict[float, int]] = {}
@@ -161,6 +167,10 @@ class EvacuationDemandModel:
     def get_total_population(self) -> int:
         """Return total regional population across all zones."""
         return sum(z.population for z in self.zones.values())
+
+    def get_paradise_population(self) -> int:
+        """Return total population across all Paradise sub-zones, reconciling to Census total."""
+        return sum(z.population for name, z in self.zones.items() if "Paradise" in name)
 
     def get_total_vehicles(self) -> int:
         """Return total regional vehicle fleet size across all zones."""

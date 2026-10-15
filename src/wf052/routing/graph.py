@@ -47,6 +47,10 @@ FALLBACK_SPEED_MPH = 25.0
 CAMP_FIRE_LANDMARKS_UTM: dict[str, tuple[float, float]] = {
     "Paradise": (618047.8, 4401983.8),  # Central Paradise (Skyway / Pearson)
     "Upper_Paradise": (620099.0, 4404502.5),  # Upper Paradise (Skyway / Clark)
+    "Paradise_North": (620099.0, 4404502.5),  # Upper Skyway / Clark
+    "Paradise_Central": (618047.8, 4401983.8),  # Town Hall / Pearson
+    "Paradise_East": (620400.0, 4399800.0),  # Pentz / Sawmill
+    "Paradise_South": (616800.0, 4397500.0),  # Lower Clark / Neal
     "Magalia": (621690.1, 4407869.3),  # Magalia center
     "Concow": (627156.9, 4399353.8),  # Concow / Camelot
     "Stirling_City": (625821.5, 4418516.6),  # Stirling City
@@ -314,7 +318,7 @@ class RoadGraph:
     def check_destination_safety(
         self,
         arrival_field: xr.Dataset,
-        safety_buffer_km: float = 2.0,
+        safety_buffer_km: float = 6.0,
         horizon_minutes: float = 720.0,
     ) -> tuple[set[int], dict[int, float]]:
         """Check all boundary destination exits against fire encroachment within X km.

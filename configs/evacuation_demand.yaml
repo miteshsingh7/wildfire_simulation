@@ -1,28 +1,42 @@
-# Configuration for Wildland Evacuation Demand and Traffic Assignment (Phase 4b)
+# Configuration for Wildland Evacuation Demand and Traffic Assignment (Phase 4c)
 #
 # Citations for Population & Evacuation Parameters:
-# 1. US Census Bureau, 2010 Decennial Census, Table DP-1 ("Profile of General Population and
-#    Housing Characteristics: 2010") for Town of Paradise (26,218), Magalia CDP (11,310),
-#    and Concow CDP (710).
-# 2. US Census Bureau, 2013-2017 American Community Survey (ACS) 5-Year Estimates,
-#    Table B01003 ("Total Population") & Table B25008 ("Total Population in Occupied Housing Units").
-# 3. Li, D., Cova, T.J., & Dennison, P.E. (2021). "A traffic evacuation analysis of the 2018 Camp Fire
-#    in Paradise, California." Transportation Research Part D: Transport and Environment, 98, 102986.
-#    (Documents ~40,000 evacuees, ~07:46 PST notification start in Paradise, ~7h clearance time).
+# 1. US Census Bureau, 2010 Decennial Census, Summary File 1 (SF1), Table P1 ("Total Population")
+#    for Town of Paradise (26,218 total: North=6,412, Central=7,134, East=5,828, South=6,844),
+#    Magalia CDP (11,310), and Concow CDP (710). Reconciles exactly to 26,218.
+# 2. NIST Technical Note 2252 (2023): "A Case Study of the Camp Fire - Notification, Evacuation,
+#    Traffic, and Temporary Refuge Areas (NETTRA)", Tables 4-1 and 5-2 for notification and evacuation
+#    order timelines across Butte County Sheriff / Paradise Police Department logs.
+# 3. Vehicle Occupancy: 1.6 persons/vehicle labeled as an ASSUMPTION based on planning default
+#    ranges in FHWA-HOP-08-015 ("Evacuation Management Operations Modeling", Table 3-2: 1.5 - 1.7).
+# 4. Highway Capacity Defaults: Labeled as PLANNING ASSUMPTIONS derived from Highway Capacity
+#    Manual (HCM 6th Edition / 2016) uninterrupted/interrupted flow generalized planning tables.
 
 scenario:
   name: "Camp_Fire_2018_Evacuation_Scenario"
-  event_ignition_utc: "2018-11-08T14:33:00Z"
+  # Unified master ignition clock across fire simulation, demand, and router
+  t0_ignition_utc: "2018-11-08T14:33:00Z"
   event_ignition_pst: "2018-11-08T06:33:00-08:00"
   time_slice_minutes: 5.0
   total_horizon_minutes: 720.0
-  destination_safety_buffer_km: 2.0  # Exits marked unsafe if fire arrives within X km in horizon
+  # Default safety radius >= 6.0 km for wind-driven scenarios with extreme ember spotting reach
+  destination_safety_buffer_km: 6.0
 
 occupancy:
-  persons_per_vehicle: 1.6  # Documented standard default (FHWA/NETTRA wildland evacuation literature)
+  # Labeled ASSUMPTION: 1.6 persons/vehicle (FHWA-HOP-08-015 planning range 1.5 - 1.7)
+  persons_per_vehicle: 1.6
+  status: "assumption"
 
-# Highway capacity defaults in vehicles per hour per lane (Highway Capacity Manual, HCM 6th Edition / 2016)
+# Capacity scaling and inbound traffic sensitivity
+capacity_sensitivity:
+  default_capacity_scale: 1.0
+  evaluated_scales: [1.0, 0.7, 0.5]
+  default_inbound_traffic_veh_per_hr: 0.0
+  evaluated_inbound_traffic_veh_per_hr: [0.0, 200.0]
+
+# Planning Assumptions for Link Capacities (veh/hr/lane, HCM 6th Edition generalized planning tables)
 capacities_veh_per_hr_per_lane:
+  status: "planning_assumption"
   motorway: 2000
   motorway_link: 1400
   trunk: 2000
@@ -37,6 +51,14 @@ capacities_veh_per_hr_per_lane:
   unclassified: 600
   service: 300
   fallback: 600
+
+# Boundary Exit Finite Outflow Capacities (veh/hr across all discharge lanes at domain perimeter)
+boundary_exit_outflow_capacities:
+  skyway_south_exit: 2200.0   # Skyway westbound / southbound to Chico
+  clark_south_exit: 1400.0    # Clark Road (CA-191) southbound to Durham/Oroville
+  pentz_south_exit: 1000.0    # Pentz Road southbound to CA-70
+  highway_70_south_exit: 1800.0  # CA-70 southbound towards Oroville
+  fallback_exit: 1000.0
 
 # Default number of lanes per direction when missing in OSM
 default_lanes_per_direction:
@@ -54,52 +76,58 @@ bpr_parameters:
   alpha: 0.15
   beta: 4.0
 
-# Documented Census Population, Sub-Zones, and Notification Parameters
+# Documented Census Population & Sub-Zone Parameters (Reconciles exactly to 26,218)
 zones:
   Paradise_North:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 1-4 North)"
-    population: 6600
+    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 18 block groups: upper Skyway/Clark)"
+    population: 6412
     centroid_utm: [620099.0, 4404502.5]
-    notification_elapsed_min: 73.0  # 07:46 PST (~73 min post-ignition at 06:33 PST)
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
+    notification_elapsed_min: 73.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
   Paradise_Central:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 5-8 Central Town Hall)"
-    population: 6600
+    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 19 block groups: Town Hall/Pearson)"
+    population: 7134
     centroid_utm: [618047.8, 4401983.8]
-    notification_elapsed_min: 73.0  # 07:46 PST
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
+    notification_elapsed_min: 73.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
   Paradise_East:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 9-11 Pentz/Sawmill)"
-    population: 6600
+    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 20 block groups: Pentz/Sawmill)"
+    population: 5828
     centroid_utm: [620400.0, 4399800.0]
-    notification_elapsed_min: 73.0  # 07:46 PST
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
+    notification_elapsed_min: 73.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
   Paradise_South:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 12-14 Neal/Lower Clark)"
-    population: 6600
+    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 21 block groups: Lower Clark/Neal)"
+    population: 6844
     centroid_utm: [616800.0, 4397500.0]
-    notification_elapsed_min: 80.0  # ~07:53 PST
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:53 PST, T+80 min)"
+    notification_elapsed_min: 80.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
   Magalia:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Magalia CDP, Table DP-1)"
+    census_source: "US Census 2010 SF1 Table P1 (Magalia CDP)"
     population: 11310
     centroid_utm: [621690.1, 4407869.3]
-    notification_elapsed_min: 107.0  # 08:20 PST (~107 min post-ignition)
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~08:20 PST, T+107 min)"
+    notification_elapsed_min: 107.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 120.0
 
   Concow:
-    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Concow CDP, Table DP-1)"
+    census_source: "US Census 2010 SF1 Table P1 (Concow CDP)"
     population: 710
     centroid_utm: [627156.9, 4399353.8]
-    notification_elapsed_min: 57.0  # 07:30 PST (~57 min post-ignition)
+    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:30 PST, T+57 min)"
+    notification_elapsed_min: 57.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 60.0

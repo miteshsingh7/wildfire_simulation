@@ -3,6 +3,7 @@
 from wf052.routing.congestion import (
     CongestionModel,
     EdgeCapacityInfo,
+    EntrapmentMetrics,
     TimeSlicedAssignmentEngine,
     ZoneClearanceSummary,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "CongestionModel",
     "EdgeCapacityInfo",
     "EdgeRecord",
+    "EntrapmentMetrics",
     "EvacuationDemandModel",
     "EvacuationRoute",
     "EvacuationZone",
