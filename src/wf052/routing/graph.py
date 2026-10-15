@@ -311,16 +311,73 @@ class RoadGraph:
 
         return edge_arrivals
 
+    def check_destination_safety(
+        self,
+        arrival_field: xr.Dataset,
+        safety_buffer_km: float = 2.0,
+        horizon_minutes: float = 720.0,
+    ) -> tuple[set[int], dict[int, float]]:
+        """Check all boundary destination exits against fire encroachment within X km.
+
+        Returns:
+            (safe_destination_node_ids, dict of unsafe_destination_node_id -> min_arrival_time_within_buffer)
+        """
+        validate_arrival_field(arrival_field)
+        q10_grid = arrival_field["arrival_q10"].values
+        grid_x = arrival_field["x"].values
+        grid_y = arrival_field["y"].values
+
+        safe_dests: set[int] = set()
+        unsafe_dests: dict[int, float] = {}
+        buffer_m = safety_buffer_km * 1000.0
+
+        for _name, dest_id in self.boundary_destinations.items():
+            if dest_id not in self.nodes:
+                continue
+            dx_node, dy_node = self.nodes[dest_id]
+
+            # Mask cells within safety radius
+            dist_sq = (grid_x[None, :] - dx_node) ** 2 + (grid_y[:, None] - dy_node) ** 2
+            mask = dist_sq <= (buffer_m * buffer_m)
+
+            if np.any(mask):
+                min_arr = float(np.min(q10_grid[mask]))
+                if min_arr <= horizon_minutes:
+                    unsafe_dests[dest_id] = min_arr
+                else:
+                    safe_dests.add(dest_id)
+            else:
+                safe_dests.add(dest_id)
+
+        return safe_dests, unsafe_dests
+
 
 def load_camp_fire_road_graph(
     tiles_dir: Path | str = "data/tiles",
     grid_x_coords: np.ndarray | None = None,
     grid_y_coords: np.ndarray | None = None,
+    full_detail: bool = True,
 ) -> RoadGraph:
-    """Load the pre-ingested Camp Fire road graph from GeoParquet tiles."""
+    """Load the Camp Fire road graph from GeoParquet tiles.
+
+    Args:
+        tiles_dir: Directory containing roads GeoParquet files.
+        grid_x_coords: 1D array of 60m grid easting coordinates.
+        grid_y_coords: 1D array of 60m grid northing coordinates.
+        full_detail: If True, loads full-detail graph with service roads (12,379 edges).
+                     If False, loads simplified/fast drive graph (8,085 edges).
+    """
     p_tiles = Path(tiles_dir)
-    nodes_path = p_tiles / "roads_nodes.parquet"
-    edges_path = p_tiles / "roads_edges.parquet"
+    if full_detail:
+        nodes_path = p_tiles / "roads_nodes_full.parquet"
+        edges_path = p_tiles / "roads_edges_full.parquet"
+        if not nodes_path.exists() or not edges_path.exists():
+            # Fallback to standard if full not yet generated
+            nodes_path = p_tiles / "roads_nodes.parquet"
+            edges_path = p_tiles / "roads_edges.parquet"
+    else:
+        nodes_path = p_tiles / "roads_nodes.parquet"
+        edges_path = p_tiles / "roads_edges.parquet"
 
     if not nodes_path.exists() or not edges_path.exists():
         raise FileNotFoundError(
@@ -336,10 +393,11 @@ def load_camp_fire_road_graph(
         grid_x_coords = np.arange(bbox[0], bbox[2] + 60.0, 60.0)
         grid_y_coords = np.arange(bbox[3], bbox[1] - 60.0, -60.0)
 
+    mode_label = "full-detail" if full_detail else "simplified/fast"
     return RoadGraph(
         nodes_gdf=nodes_gdf,
         edges_gdf=edges_gdf,
         grid_x_coords=grid_x_coords,
         grid_y_coords=grid_y_coords,
-        osm_snapshot_flag="contemporary OSM snapshot (2018 Overpass attic data not retrieved)",
+        osm_snapshot_flag=f"contemporary OSM snapshot ({mode_label}; 2018 Overpass attic data not retrieved)",
     )

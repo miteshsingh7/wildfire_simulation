@@ -1,0 +1,105 @@
+# Configuration for Wildland Evacuation Demand and Traffic Assignment (Phase 4b)
+#
+# Citations for Population & Evacuation Parameters:
+# 1. US Census Bureau, 2010 Decennial Census, Table DP-1 ("Profile of General Population and
+#    Housing Characteristics: 2010") for Town of Paradise (26,218), Magalia CDP (11,310),
+#    and Concow CDP (710).
+# 2. US Census Bureau, 2013-2017 American Community Survey (ACS) 5-Year Estimates,
+#    Table B01003 ("Total Population") & Table B25008 ("Total Population in Occupied Housing Units").
+# 3. Li, D., Cova, T.J., & Dennison, P.E. (2021). "A traffic evacuation analysis of the 2018 Camp Fire
+#    in Paradise, California." Transportation Research Part D: Transport and Environment, 98, 102986.
+#    (Documents ~40,000 evacuees, ~07:46 PST notification start in Paradise, ~7h clearance time).
+
+scenario:
+  name: "Camp_Fire_2018_Evacuation_Scenario"
+  event_ignition_utc: "2018-11-08T14:33:00Z"
+  event_ignition_pst: "2018-11-08T06:33:00-08:00"
+  time_slice_minutes: 5.0
+  total_horizon_minutes: 720.0
+  destination_safety_buffer_km: 2.0  # Exits marked unsafe if fire arrives within X km in horizon
+
+occupancy:
+  persons_per_vehicle: 1.6  # Documented standard default (FHWA/NETTRA wildland evacuation literature)
+
+# Highway capacity defaults in vehicles per hour per lane (Highway Capacity Manual, HCM 6th Edition / 2016)
+capacities_veh_per_hr_per_lane:
+  motorway: 2000
+  motorway_link: 1400
+  trunk: 2000
+  trunk_link: 1400
+  primary: 1500
+  primary_link: 1000
+  secondary: 1200
+  secondary_link: 800
+  tertiary: 900
+  tertiary_link: 600
+  residential: 600
+  unclassified: 600
+  service: 300
+  fallback: 600
+
+# Default number of lanes per direction when missing in OSM
+default_lanes_per_direction:
+  trunk: 2
+  primary: 1
+  secondary: 1
+  tertiary: 1
+  residential: 1
+  unclassified: 1
+  service: 1
+  fallback: 1
+
+# BPR Congestion Function Parameters: t = t_0 * (1 + alpha * (V/C)^beta)
+bpr_parameters:
+  alpha: 0.15
+  beta: 4.0
+
+# Documented Census Population, Sub-Zones, and Notification Parameters
+zones:
+  Paradise_North:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 1-4 North)"
+    population: 6600
+    centroid_utm: [620099.0, 4404502.5]
+    notification_elapsed_min: 73.0  # 07:46 PST (~73 min post-ignition at 06:33 PST)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Paradise_Central:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 5-8 Central Town Hall)"
+    population: 6600
+    centroid_utm: [618047.8, 4401983.8]
+    notification_elapsed_min: 73.0  # 07:46 PST
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Paradise_East:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 9-11 Pentz/Sawmill)"
+    population: 6600
+    centroid_utm: [620400.0, 4399800.0]
+    notification_elapsed_min: 73.0  # 07:46 PST
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Paradise_South:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Town of Paradise, Zone 12-14 Neal/Lower Clark)"
+    population: 6600
+    centroid_utm: [616800.0, 4397500.0]
+    notification_elapsed_min: 80.0  # ~07:53 PST
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Magalia:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Magalia CDP, Table DP-1)"
+    population: 11310
+    centroid_utm: [621690.1, 4407869.3]
+    notification_elapsed_min: 107.0  # 08:20 PST (~107 min post-ignition)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 120.0
+
+  Concow:
+    census_source: "US Census 2010 DP-1 / 2017 ACS 5-yr (Concow CDP, Table DP-1)"
+    population: 710
+    centroid_utm: [627156.9, 4399353.8]
+    notification_elapsed_min: 57.0  # 07:30 PST (~57 min post-ignition)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 60.0

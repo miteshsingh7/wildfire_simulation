@@ -22,7 +22,7 @@ from wf052.routing.contracts import (
     RoutingMode,
     validate_arrival_field,
 )
-from wf052.routing.graph import RoadGraph, load_camp_fire_road_graph
+from wf052.routing.graph import RoadGraph
 from wf052.routing.replan import ReplanEngine
 from wf052.routing.router import TimeDependentRouter
 from wf052.routing.synthetic_fire import (
@@ -31,12 +31,6 @@ from wf052.routing.synthetic_fire import (
     create_wind_ellipse_arrival_field,
 )
 from wf052.routing.validator import IndependentRouteValidator
-
-
-@pytest.fixture
-def camp_fire_graph() -> RoadGraph:
-    """Load the pre-ingested Camp Fire road graph."""
-    return load_camp_fire_road_graph()
 
 
 @pytest.fixture

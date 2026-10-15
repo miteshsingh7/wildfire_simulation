@@ -40,6 +40,7 @@ class ReplanEngine:
         buffer_minutes: float = 15.0,
         mode: RoutingMode = RoutingMode.FASTEST_SAFE,
         validate_routes: bool = True,
+        destination_safety_buffer_km: float = 0.0,
     ) -> ReplanResult:
         """Execute complete evacuation re-plan for specified origins against a new ArrivalField.
 
@@ -83,6 +84,23 @@ class ReplanEngine:
                         raise ValueError(f"Unknown destination landmark: '{d}'")
                 else:
                     dest_node_ids.add(int(d))
+
+        unsafe_dest_info: dict[str, float] = {}
+        if destination_safety_buffer_km > 0.0:
+            safe_dests, unsafe_dests = self.road_graph.check_destination_safety(
+                arrival_field=arrival_field,
+                safety_buffer_km=destination_safety_buffer_km,
+            )
+            # Find which requested destinations are unsafe
+            for u_nid, min_arr in unsafe_dests.items():
+                if u_nid in dest_node_ids:
+                    dest_node_ids.remove(u_nid)
+                    unsafe_dest_info[f"node_{u_nid}"] = min_arr
+
+            # If all destinations became unsafe, keep the one with greatest arrival time
+            if not dest_node_ids and unsafe_dests:
+                safest_fallback = max(unsafe_dests.keys(), key=lambda k: unsafe_dests[k])
+                dest_node_ids.add(safest_fallback)
 
         # 3. Resolve origin node IDs
         origin_map: dict[str, int] = {}
@@ -138,5 +156,6 @@ class ReplanEngine:
                 "num_destinations": len(dest_node_ids),
                 "num_edges": len(self.road_graph.edges),
                 "osm_snapshot": self.road_graph.osm_snapshot_flag,
+                "unsafe_destinations": str(unsafe_dest_info),
             },
         )
