@@ -1,0 +1,34 @@
+model_name: pytorchfire_teacher_v2_joint_rolling
+version: 2.0.0
+operating_resolution_m: 60
+crs: EPSG:32610
+steps_per_hour: 30
+calibration_protocol: Jointly calibrated (P_base, alpha_launch, beta_dist_m_per_ms,
+  p_urban_wui) on Kincade, Glass, Zogg under rolling-horizon 1-6h objective (re-init
+  every 3rd GOFER perimeter). Camp Fire (development) and fresh held-out fires (Slater/Devil,
+  Walker, Cold Springs) strictly unseen.
+contact_parameters:
+  p_base: 0.2
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+ember_parameters:
+  alpha_launch: 0.0045
+  beta_dist_m_per_ms: 85.0
+  p_urban_wui: 0.16
+use_ember_kernel: true
+rolling_ember_off_baseline:
+  p_base: 0.22
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.3
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0

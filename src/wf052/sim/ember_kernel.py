@@ -126,6 +126,8 @@ def simulate_teacher_with_embers_60m(
     init_burned_mask: np.ndarray | None = None,
     start_hour_index: int = 0,
     start_elapsed_min: float = 0.0,
+    wind_speed_mult: float = 1.0,
+    wind_dir_offset_deg: float = 0.0,
 ) -> dict[str, Any]:
     """Run 60m PyTorchFire teacher with optional switchable ember kernel and assimilation init."""
     device = ds.p_veg_base.device
@@ -188,17 +190,38 @@ def simulate_teacher_with_embers_60m(
         torch.tensor([[3.0, 2.0, 1.0], [4.0, 0.0, 0.0], [5.0, 6.0, 7.0]], device=device) * 45.0
     ).view(1, 1, 3, 3)
 
-    raw_init_np = init_burned_mask if init_burned_mask is not None else ds.gofer_hourly_masks[0]
+    raw_init_np = init_burned_mask if init_burned_mask is not None else ds.gofer_hourly_masks[start_hour_index]
     init_mask = torch.from_numpy(raw_init_np).to(device=device, dtype=torch.bool)
 
     init_float = init_mask.float().unsqueeze(0).unsqueeze(0)
     eroded = F.max_pool2d(1.0 - init_float, kernel_size=3, stride=1, padding=1) < 0.5
     eroded_mask = eroded.squeeze(0).squeeze(0) & init_mask
-    burning = init_mask & (~eroded_mask)
-    burned = eroded_mask.clone()
+    boundary_ring = init_mask & (~eroded_mask)
+
+    # At rolling GOFER origins t0 >= 2h, rear/flank edges that stopped advancing hours ago are burned out;
+    # only the active fireline near recent growth (t0 - 3h .. t0) remains actively flaming.
+    if (
+        start_hour_index >= 2
+        and start_hour_index < len(ds.gofer_hourly_masks)
+        and np.array_equal(raw_init_np, ds.gofer_hourly_masks[start_hour_index])
+    ):
+        prev_idx = max(0, start_hour_index - 3)
+        recent_np = raw_init_np & (~ds.gofer_hourly_masks[prev_idx])
+        if np.any(recent_np):
+            recent_t = torch.from_numpy(recent_np).to(device=device, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+            active_zone = F.max_pool2d(recent_t, kernel_size=7, stride=1, padding=3).squeeze(0).squeeze(0) > 0.5
+            burning = boundary_ring & active_zone
+            burned = init_mask & (~burning)
+        else:
+            burning = boundary_ring
+            burned = eroded_mask.clone()
+    else:
+        burning = boundary_ring
+        burned = eroded_mask.clone()
+
     if not torch.any(burning):
-        burning = init_mask.clone()
-        burned = torch.zeros_like(init_mask)
+        burning = boundary_ring if torch.any(boundary_ring) else init_mask.clone()
+        burned = init_mask & (~burning)
 
     arrival_min_tensor = torch.full((h, w), float("nan"), dtype=torch.float32, device=device)
     arrival_min_tensor[init_mask] = float(start_elapsed_min)
@@ -214,9 +237,9 @@ def simulate_teacher_with_embers_60m(
     for hr in range(duration_hours):
         w_idx = min(start_hour_index + hr, len(ds.weather_df) - 1)
         w_row = ds.weather_df.iloc[w_idx]
-        ws = float(w_row["wind_speed_ms"])
-        w_gust = float(w_row.get("wind_gust_ms", ws * 1.4))
-        towards_deg = float((270.0 - float(w_row["wind_direction_deg"])) % 360.0)
+        ws = max(0.0, float(w_row["wind_speed_ms"]) * float(wind_speed_mult))
+        w_gust = max(0.0, float(w_row.get("wind_gust_ms", ws * 1.4)) * float(wind_speed_mult))
+        towards_deg = float((270.0 - (float(w_row["wind_direction_deg"]) + float(wind_dir_offset_deg))) % 360.0)
         rh = float(w_row.get("rh_pct", 20.0))
 
         rh_damping = float(np.exp(-params.wind_moisture_damping * max(0.0, rh - 15.0) / 100.0))
