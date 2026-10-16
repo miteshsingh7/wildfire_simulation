@@ -1,0 +1,70 @@
+# Configuration for Surrogate Scenario Generation & Stand-in Dataset (Phase 2A)
+#
+# Stand-in data sources: teacher_v1 simulation and analytic wind-ellipse generator.
+# Every generated sample is tagged with "scaffold" and the teacher config hash.
+
+scaffold:
+  is_standin: true
+  scaffold_tag: "scaffold"
+  teacher_config_path: "configs/teacher_v1.yaml"
+  teacher_config_hash: "c45ba6db95187063347ad1c06e81dbb29ff3e45fa92f50ad46d8dcc9e16cf9b6"
+
+domain:
+  tile_size: [256, 256]           # H, W in cells
+  resolution_m: 60.0              # 60 meters per pixel (15.36 km x 15.36 km tile)
+  horizon_hours: 12.0             # 12-hour simulation horizon
+  horizon_minutes: 720.0          # 720 minutes maximum arrival time
+  crs: "EPSG:32610"
+
+training_fires:
+  - name: "bobcat"
+    tile_dir: "data/tiles/fires/bobcat"
+    base_ignition_clock_utc: "2020-09-06T19:00:00Z"
+  - name: "caldor"
+    tile_dir: "data/tiles/fires/caldor"
+    base_ignition_clock_utc: "2021-08-15T02:00:00Z"
+  - name: "creek"
+    tile_dir: "data/tiles/fires/creek"
+    base_ignition_clock_utc: "2020-09-05T01:30:00Z"
+  - name: "glass"
+    tile_dir: "data/tiles/fires/glass"
+    base_ignition_clock_utc: "2020-09-27T10:48:00Z"
+  - name: "kincade"
+    tile_dir: "data/tiles/fires/kincade"
+    base_ignition_clock_utc: "2019-10-24T04:27:00Z"
+  - name: "tamarack"
+    tile_dir: "data/tiles/fires/tamarack"
+    base_ignition_clock_utc: "2021-07-04T23:00:00Z"
+  - name: "zogg"
+    tile_dir: "data/tiles/fires/zogg"
+    base_ignition_clock_utc: "2020-09-27T21:51:00Z"
+
+# Never include the Camp Fire domain in surrogate training scenarios
+prohibited_domains:
+  - "camp_fire_2018"
+  - "data/tiles/elevation.tif"
+
+ensemble:
+  num_members: 20
+  base_seed: 42000
+  perturbations:
+    wind_speed_multiplier_range: [0.80, 1.20]       # +/- 20% wind speed
+    wind_direction_jitter_deg_range: [-30.0, 30.0]  # +/- 30 degrees wind direction
+    ignition_offset_cells_range: [-10, 10]          # +/- 10 cells in row/col
+    fuel_moisture_damping_range: [0.0, 0.20]        # moisture damping factor
+    ellipse_length_to_breadth_jitter: [-0.3, 0.3]   # eccentricity perturbation
+
+# Stand-in generation methods
+generation_modes:
+  - "wind_ellipse_analytic"       # Fast closed-form Huygens expansion
+  - "teacher_v1_cellular"         # Cellular automaton / Rothermel stand-in
+
+# Fuel group classification mapping for FBFM40
+fuel_groups:
+  0: "Non-burnable / Urban / Water"  # FBFM40 codes 91-99, or unburnable
+  1: "Grass (GR)"                    # Codes 101-109 (GR1 - GR9)
+  2: "Grass-Shrub (GS)"              # Codes 121-124 (GS1 - GS4)
+  3: "Shrub (SH)"                    # Codes 141-149 (SH1 - SH9)
+  4: "Timber-Understory (TU)"        # Codes 161-165 (TU1 - TU5)
+  5: "Timber-Litter (TL)"            # Codes 181-189 (TL1 - TL9)
+  6: "Slash-Blowdown (SB)"           # Codes 201-204 (SB1 - SB4)
