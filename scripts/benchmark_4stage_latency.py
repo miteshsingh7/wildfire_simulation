@@ -132,11 +132,16 @@ def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
         times_stage4.append(t4_1 - t4_0)
         times_total.append(t_run_end - t_run_start)
 
+    times_partition_a = [t1 + t3 for t1, t3 in zip(times_stage1, times_stage3, strict=True)]
+    times_partition_b = [t2 + t4 for t2, t4 in zip(times_stage2, times_stage4, strict=True)]
+
     stages = [
         ("Stage 1: Field Update & Edge Mapping", times_stage1),
         ("Stage 2: Congested Time-Sliced Re-Assignment (t >= t_now)", times_stage2),
         ("Stage 3: Independent Route Validation", times_stage3),
         ("Stage 4: Cohort Entrapment Metrics (Real Cohorts)", times_stage4),
+        ("(a) Router + Validation Latency (Stages 1 + 3)", times_partition_a),
+        ("(b) Background Flow / Entrapment Latency (Stages 2 + 4)", times_partition_b),
         ("Total End-to-End Pipeline", times_total),
     ]
 
@@ -145,7 +150,7 @@ def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
         arr_ms = np.array(data) * 1000.0
         records.append(
             {
-                "Stage": name,
+                "Stage / Partition": name,
                 "p50 (ms)": round(float(np.percentile(arr_ms, 50)), 2),
                 "p95 (ms)": round(float(np.percentile(arr_ms, 95)), 2),
                 "max (ms)": round(float(np.max(arr_ms)), 2),
@@ -156,10 +161,10 @@ def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
     df = pd.DataFrame(records)
     out_csv = Path("reports/latency_4stage_benchmark.csv")
     df.to_csv(out_csv, index=False)
-    print(f"\nSaved 4-stage latency benchmark to {out_csv}")
-    print("\n" + "=" * 80)
-    print("FOUR-STAGE END-TO-END EVACUATION ROUTER LATENCY BENCHMARK (ms)")
-    print("=" * 80)
+    print(f"\nSaved 4-stage and partitioned latency benchmark to {out_csv}")
+    print("\n" + "=" * 90)
+    print("EVACUATION ROUTER PARTITIONED LATENCY BENCHMARK (ms)")
+    print("=" * 90)
     print(df.to_string(index=False))
     return df
 

@@ -71,6 +71,34 @@ bpr_parameters:
   alpha: 0.15
   beta: 4.0
 
+# Physical link vehicle storage parameter (HCM 2016 planning standard: ~7.7 m per queued vehicle)
+jam_density_veh_per_km_per_lane: 130.0
+
+# Inbound emergency response corridors (only these named corridors receive inbound traffic reduction)
+inbound_emergency_corridors:
+  - "Skyway"
+  - "Clark"
+  - "Neal"
+  - "Pentz"
+  - "Highway 70"
+  - "State Highway 70"
+  - "CA-70"
+  - "CA 70"
+
+# Time-dependent roadway closures from empirical field records (NIST TN 2252 sup Table A-2)
+roadway_closures:
+  - name: "Hwy 70 at Pentz Rd"
+    closure_time_elapsed_min: 54.0   # 07:27 PST (T+54 min)
+    lat: 39.649847
+    lon: -121.559463
+    radius_m: 600.0
+    source_citation: "NIST TN 2252 sup Table A-2 row 07:29 Radio Log (p. 19)"
+
+# Method of Successive Averages (MSA) convergence parameters
+msa_convergence:
+  max_iterations: 8
+  tolerance: 0.015
+
 # Capacity scaling and sensitivity parameters
 capacity_sensitivity:
   default_capacity_scale: 1.0

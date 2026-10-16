@@ -1,0 +1,12 @@
+parameter,value,file,page_figure,script,status
+Zone Evacuation Warnings & Orders,"Table 11 timeline (e.g. Zones 3, 8, 14 @ 07:46; Zones 2, 6, 7, 13 @ 08:01; Zones 1, 4, 5, 9, 11 @ 08:49)",data/raw/nist/table_11_evacuation_timeline.csv,NIST TN 2252 p. 94 (Table 11),scripts/derive_nist_parameters.py,extracted
+Reverse-911 CodeRED Failure Rate,"42% to 47% (Table D-2 unreached/attempted; e.g. 08:32 = 42.1%, 08:44 = 47.3%)",data/raw/nist/table_d2_codered_statistics.csv,NIST TN 2252 sup p. 137 (Table D-2),scripts/derive_nist_parameters.py,extracted
+Primary Roadway Lanes & Speeds,Skyway 2-4 lanes 35-50 mph; Clark Rd 2 lanes 35-45 mph; Pentz Rd 2 lanes 35-45 mph,data/raw/nist/table_b1_primary_roadways.csv,NIST TN 2252 sup p. 115-120 (Table B-1),scripts/derive_nist_parameters.py,extracted
+Hwy 70 at Pentz Rd Closure,07:27-07:29 PST (T+54 min) LE shutting down NB traffic at Pentz Rd from CA-70,data/tiles/nist_roadblocks_a2.parquet,"NIST TN 2252 sup p. 19 (Table A-2, row 07:29)",scripts/parse_nist_empirical_data.py,extracted
+Corridor Empirical Travel Times,Bille to Almond 60 min (08:45); Kmart to Almond 120 min (09:00),data/raw/NIST.TN.2252sup.pdf,NIST TN 2252 sup p. 29 (TD-078) & p. 35 (TD-053),scripts/derive_nist_parameters.py,extracted
+Town of Paradise 2010 Population,"26,218 persons (reconciled across 332 Census 2010 blocks)",data/tiles/census2010_butte_blocks_pophu.parquet,US Census Bureau 2010 Decennial Census SF1 Table P1,src/wf052/routing/demand.py,extracted
+Vehicle Occupancy,"1.60 persons / vehicle (16,386 total Paradise vehicles)",configs/evacuation_demand.yaml,FHWA-HOP-08-015 Table 3-2 planning default,src/wf052/routing/demand.py,assumption
+Spontaneous Self-Evacuation Fraction,15% departing 30 min prior to official mandatory order,configs/evacuation_demand.yaml,NIST TN 2252 sup Appendix A qualitative narrative,src/wf052/routing/demand.py,assumption
+Chico CA-99 Background Commute Flow,500 veh/hr reducing Skyway/CA-99 merge capacity,configs/evacuation_demand.yaml,NIST TN 2252 sup Table A-2 row 07:57 TD-086 bounded by PeMS,src/wf052/routing/congestion.py,assumption
+Boundary Exit Outflow Capacities,"Skyway 1,600 vph; Clark 1,200 vph; Pentz 1,000 vph; Hwy 70 1,400 vph",configs/evacuation_demand.yaml,Caltrans PeMS CA-99 mainline & ramps (NIST sup App G),src/wf052/routing/congestion.py,assumption
+Physical Link Jam Density,130 veh/km/lane (~7.7 m per queued vehicle),configs/evacuation_demand.yaml,Highway Capacity Manual (HCM 2016) Exhibit 24-9,src/wf052/routing/congestion.py,assumption

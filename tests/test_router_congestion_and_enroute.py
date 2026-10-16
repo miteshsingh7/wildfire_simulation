@@ -709,3 +709,53 @@ def test_latency_benchmark_30pct_infeasible_fields(camp_fire_graph: RoadGraph) -
     assert max_a < 5.0
     assert max_b < 5.0
     assert max_e2e < 10.0
+
+
+def test_phase4e_block_level_demand_loading(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4e Task 1: Verify census block loading, origin node aggregation, and reconciliation."""
+    dm = EvacuationDemandModel(road_graph=camp_fire_graph)
+    assert dm.get_paradise_population() == 26218
+    assert len(dm.block_demands) >= 300
+    assert dm.unique_origin_nodes_count >= 200
+    assert dm.max_per_node_load < 500
+    assert dm.max_load_node_id in camp_fire_graph.nodes
+
+
+def test_phase4e_inbound_corridor_filtering(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4e Task 2: Verify inbound emergency traffic applies only to named corridors."""
+    cm = CongestionModel(
+        road_graph=camp_fire_graph,
+        capacity_scale=1.0,
+        inbound_traffic_veh_per_hr=200.0,
+    )
+    skyway_edge = next(
+        e
+        for e in cm.edge_capacities
+        if "skyway" in str(camp_fire_graph.edges[e.edge_idx].name).lower()
+    )
+    assert skyway_edge.is_inbound_corridor is True
+    assert skyway_edge.capacity_veh_per_hr == skyway_edge.nominal_capacity_veh_per_hr - 200.0
+
+    residential_edge = next(
+        e
+        for e in cm.edge_capacities
+        if "residential" in e.highway.lower() and not e.is_inbound_corridor
+    )
+    assert residential_edge.is_inbound_corridor is False
+    assert residential_edge.capacity_veh_per_hr == residential_edge.nominal_capacity_veh_per_hr
+
+
+def test_phase4e_link_storage_and_spillback(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4e Task 3: Verify link storage calculation and spillback tracking."""
+    cm = CongestionModel(road_graph=camp_fire_graph)
+    for e in cm.edge_capacities[:100]:
+        ed = camp_fire_graph.edges[e.edge_idx]
+        expected_storage = max(1.0, (ed.length_m / 1000.0) * e.lanes * 130.0)
+        assert abs(e.storage_veh - expected_storage) < 1e-4
+
+
+def test_phase4e_time_dependent_roadblock_closure(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4e Task 5: Verify time-dependent closure of Hwy 70 at Pentz Rd at T+54 min."""
+    cm = CongestionModel(road_graph=camp_fire_graph)
+    assert len(cm.roadway_closures) >= 1
+    assert any("70" in c["name"] and "Pentz" in c["name"] for c in cm.roadway_closures)

@@ -29,7 +29,7 @@ from wf052.routing.router import TimeDependentRouter
 
 @dataclass
 class EdgeCapacityInfo:
-    """Capacity and congestion properties of an edge in the road graph."""
+    """Capacity, physical link storage, and congestion properties of an edge in the road graph."""
 
     edge_idx: int
     u: int
@@ -40,6 +40,9 @@ class EdgeCapacityInfo:
     nominal_capacity_veh_per_hr: float
     capacity_veh_per_hr: float
     free_traversal_time_min: float
+    storage_veh: float = 50.0
+    is_inbound_corridor: bool = False
+    has_spillback: bool = False
     is_contraflow: bool = False
 
 
@@ -105,13 +108,27 @@ class CongestionModel:
         # Boundary exit outflow capacities
         self.exit_outflow_capacities = self.cfg.get("boundary_exit_outflow_capacities", {})
 
+        # Named corridors for emergency inbound traffic (Skyway, Clark, Neal, Pentz, Hwy 70)
+        self.inbound_corridors = [
+            c.lower()
+            for c in self.cfg.get(
+                "inbound_emergency_corridors",
+                ["Skyway", "Clark", "Neal", "Pentz", "Highway 70", "CA-70", "CA 70"],
+            )
+        ]
+        self.jam_density_veh_per_km_per_lane = float(
+            self.cfg.get("jam_density_veh_per_km_per_lane", 130.0)
+        )
+        self.roadway_closures = self.cfg.get("roadway_closures", [])
+
         self.edge_capacities: list[EdgeCapacityInfo] = []
         self._initialize_edge_capacities()
 
     def _initialize_edge_capacities(self) -> None:
-        """Assign lanes, nominal capacity, and effective scaled capacity to every edge."""
+        """Assign lanes, nominal capacity, physical storage, and effective scaled capacity to every edge."""
         for edge in self.road_graph.edges:
             hw = edge.highway.lower()
+            name_lower = str(edge.name or "").lower()
             lanes = 1
             for k_hw, l_val in self.lane_defaults.items():
                 if k_hw in hw:
@@ -125,9 +142,16 @@ class CongestionModel:
                     break
 
             nominal_cap = float(cap_per_lane * lanes)
-            # Apply capacity scale and subtract inbound emergency traffic demand
-            effective_cap = max(
-                10.0, (nominal_cap * self.capacity_scale) - self.inbound_traffic_veh_per_hr
+
+            # Inbound emergency deduction applies strictly to named corridors (Skyway, Clark, Neal, Pentz, Hwy 70)
+            is_corridor = any(c in name_lower for c in self.inbound_corridors)
+            inbound_deduction = self.inbound_traffic_veh_per_hr if is_corridor else 0.0
+
+            effective_cap = max(10.0, (nominal_cap * self.capacity_scale) - inbound_deduction)
+
+            # Physical link vehicle storage: (length_m / 1000) * lanes * jam_density
+            storage = max(
+                1.0, (edge.length_m / 1000.0) * lanes * self.jam_density_veh_per_km_per_lane
             )
 
             self.edge_capacities.append(
@@ -141,6 +165,9 @@ class CongestionModel:
                     nominal_capacity_veh_per_hr=nominal_cap,
                     capacity_veh_per_hr=effective_cap,
                     free_traversal_time_min=edge.traversal_time_min,
+                    storage_veh=storage,
+                    is_inbound_corridor=is_corridor,
+                    has_spillback=False,
                     is_contraflow=False,
                 )
             )
@@ -283,6 +310,10 @@ class TimeSlicedAssignmentEngine:
         self.last_edge_total_delays: np.ndarray = np.zeros(
             len(self.road_graph.edges), dtype=np.float64
         )
+        self.last_relative_gaps_per_slice: dict[float, float] = {}
+        self.last_msa_iterations_per_slice: dict[float, int] = {}
+        self.last_spillback_edges: dict[int, float] = {}
+        self._closure_points_utm: dict[tuple[float, float], tuple[float, float]] = {}
 
     def run_assignment(
         self,
@@ -343,6 +374,9 @@ class TimeSlicedAssignmentEngine:
         self.last_vehicles_per_exit_over_time = defaultdict(lambda: defaultdict(int))
         self.last_vehicles_per_exit_by_id = defaultdict(lambda: defaultdict(int))
         self.last_edge_queues_over_time = defaultdict(lambda: defaultdict(float))
+        self.last_relative_gaps_per_slice = {}
+        self.last_msa_iterations_per_slice = {}
+        self.last_spillback_edges = {}
         cohort_trajectories: list[dict[str, Any]] = []
 
         # Fast edge lookup: (u, v, key) -> edge_idx
@@ -357,6 +391,12 @@ class TimeSlicedAssignmentEngine:
             cap = self.congestion_model.get_exit_outflow_capacity(d)
             commute = self.congestion_model.get_exit_commute_traffic(d)
             effective_exit_capacities[d] = max(100.0, cap - commute)
+
+        # MSA convergence configuration
+        msa_conv_cfg = self.congestion_model.cfg.get("msa_convergence", {})
+        default_max_iters = int(msa_conv_cfg.get("max_iterations", 8))
+        msa_tol = float(msa_conv_cfg.get("tolerance", 0.015))
+        k_max = msa_iterations if msa_iterations != 4 else default_max_iters
 
         for t_slice in all_times:
             slice_demands = demands_by_time[t_slice]
@@ -413,23 +453,52 @@ class TimeSlicedAssignmentEngine:
                         )
                 continue
 
-            # CONGESTED QUEUE-AWARE ASSIGNMENT WITH MSA LOGIT FLOW SPLITTING
+            # Identify active empirical roadblock closures at t_slice (e.g. Hwy 70 at Pentz @ 07:27 / T+54 min)
+            closed_edge_indices: set[int] = set()
+            for closure in self.congestion_model.roadway_closures:
+                if t_slice >= float(closure.get("closure_time_elapsed_min", 0.0)):
+                    c_lat = float(closure["lat"])
+                    c_lon = float(closure["lon"])
+                    c_rad = float(closure.get("radius_m", 600.0))
+                    if (c_lat, c_lon) not in self._closure_points_utm:
+                        import pyproj
+
+                        tr = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32610", always_xy=True)
+                        self._closure_points_utm[(c_lat, c_lon)] = tr.transform(c_lon, c_lat)
+                    cx, cy = self._closure_points_utm[(c_lat, c_lon)]
+                    for e in self.road_graph.edges:
+                        u_pt = self.road_graph.nodes[e.u]
+                        v_pt = self.road_graph.nodes[e.v]
+                        if (
+                            np.hypot(u_pt[0] - cx, u_pt[1] - cy) <= c_rad
+                            or np.hypot(v_pt[0] - cx, v_pt[1] - cy) <= c_rad
+                        ):
+                            closed_edge_indices.add(e.edge_idx)
+
+            # CONGESTED QUEUE-AWARE ASSIGNMENT WITH MSA LOGIT FLOW SPLITTING & RELATIVE GAP CONVERGENCE
             tentative_edge_flows = np.zeros(num_edges, dtype=np.float64)
             tentative_exit_flows: dict[int, float] = {d: 0.0 for d in destination_node_ids}
             dem_assigned_split: dict[Any, dict[int, float]] = {}
             dem_parents: dict[Any, dict[int, tuple[int, int]]] = {}
             dem_reached: dict[Any, list[int]] = {}
 
-            k_max = max(1, msa_iterations)
             for k in range(1, k_max + 1):
                 alpha_k = 1.0 / float(k)
 
-                # 1. Update dynamic edge traversal times (t_free + queue_delay)
+                # 1. Update dynamic edge traversal times (t_free + queue_delay + spillback penalty)
                 dyn_edge_times = np.zeros(num_edges, dtype=np.float64)
                 for e_idx in range(num_edges):
+                    if e_idx in closed_edge_indices:
+                        dyn_edge_times[e_idx] = float("inf")
+                        continue
                     cap_e = self.congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
                     q_e = edge_queues[e_idx] + 0.5 * tentative_edge_flows[e_idx]
+                    storage_e = self.congestion_model.edge_capacities[e_idx].storage_veh
                     q_delay = (q_e / cap_e) * 60.0 if cap_e > 0 else 0.0
+                    if q_e > storage_e:
+                        # Physical spillback impedance: links exceeding vehicle storage penalize ingress
+                        spill_penalty = ((q_e - storage_e) / max(10.0, cap_e)) * 60.0
+                        q_delay += spill_penalty
                     dyn_edge_times[e_idx] = (
                         self.congestion_model.edge_capacities[e_idx].free_traversal_time_min
                         + q_delay
@@ -445,48 +514,54 @@ class TimeSlicedAssignmentEngine:
                     else:
                         exit_delays[d] = 0.0
 
-                # 3. Settle all destinations via FIFO Dijkstra & compute Logit choice probabilities
+                # 3. Settle destinations via Dijkstra memoized by origin node
+                dijkstra_cache: dict[
+                    int, tuple[Any, dict[int, float], dict[int, tuple[int, int]]]
+                ] = {}
+
                 for dem in slice_demands:
                     cnt = dem.vehicle_count
                     if cnt <= 0:
                         continue
 
-                    # Try constrained fastest safe route to all destinations
-                    _best_dest, earliest_arrival, parent = _run_constrained_dijkstra(
-                        road_graph=self.road_graph,
-                        origin_node=dem.origin_node_id,
-                        destination_nodes=destination_node_ids,
-                        t0=t_slice,
-                        buffer_minutes=buffer_minutes,
-                        edge_fire_arrivals=edge_fire_arrivals,
-                        dynamic_edge_traversal_times=dyn_edge_times,
-                        destination_exit_delays=exit_delays,
-                        settle_all_destinations=True,
-                    )
-                    reached_dests = [d for d in destination_node_ids if d in earliest_arrival]
-
-                    # Fallback to unconstrained reachability if fire cuts all safe routes
-                    if not reached_dests:
+                    if dem.origin_node_id in dijkstra_cache:
+                        _best_dest, earliest_arrival, parent = dijkstra_cache[dem.origin_node_id]
+                    else:
                         _best_dest, earliest_arrival, parent = _run_constrained_dijkstra(
                             road_graph=self.road_graph,
                             origin_node=dem.origin_node_id,
                             destination_nodes=destination_node_ids,
                             t0=t_slice,
-                            buffer_minutes=-1e9,
+                            buffer_minutes=buffer_minutes,
                             edge_fire_arrivals=edge_fire_arrivals,
                             dynamic_edge_traversal_times=dyn_edge_times,
                             destination_exit_delays=exit_delays,
                             settle_all_destinations=True,
                         )
-                        reached_dests = [d for d in destination_node_ids if d in earliest_arrival]
+                        reached_dests_check = [
+                            d for d in destination_node_ids if d in earliest_arrival
+                        ]
+                        if not reached_dests_check:
+                            _best_dest, earliest_arrival, parent = _run_constrained_dijkstra(
+                                road_graph=self.road_graph,
+                                origin_node=dem.origin_node_id,
+                                destination_nodes=destination_node_ids,
+                                t0=t_slice,
+                                buffer_minutes=-1e9,
+                                edge_fire_arrivals=edge_fire_arrivals,
+                                dynamic_edge_traversal_times=dyn_edge_times,
+                                destination_exit_delays=exit_delays,
+                                settle_all_destinations=True,
+                            )
+                        dijkstra_cache[dem.origin_node_id] = (_best_dest, earliest_arrival, parent)
 
+                    reached_dests = [d for d in destination_node_ids if d in earliest_arrival]
                     if not reached_dests:
                         continue
 
                     dem_parents[dem] = parent
                     dem_reached[dem] = reached_dests
 
-                    # Cost = path travel time + boundary exit bottleneck queue delay
                     costs = np.array(
                         [
                             (earliest_arrival[d] - t_slice) + exit_delays.get(d, 0.0)
@@ -510,7 +585,40 @@ class TimeSlicedAssignmentEngine:
                             for d in reached_dests
                         }
 
-                # 4. Update tentative flows for next MSA iteration
+                # 4. Compute Relative Gap across slice demands
+                total_sys_cost = 0.0
+                min_sys_cost = 0.0
+                for dem, split in dem_assigned_split.items():
+                    earliest_arrival = dijkstra_cache.get(dem.origin_node_id, (None, {}, {}))[1]
+                    d_costs = [
+                        (earliest_arrival[d] - t_slice) + exit_delays.get(d, 0.0)
+                        for d in split.keys()
+                        if d in earliest_arrival
+                    ]
+                    if not d_costs:
+                        continue
+                    min_c = min(d_costs)
+                    sum_f = sum(split.values())
+                    min_sys_cost += sum_f * min_c
+                    for d, f_d in split.items():
+                        c_d = (earliest_arrival.get(d, 0.0) - t_slice) + exit_delays.get(d, 0.0)
+                        total_sys_cost += f_d * c_d
+
+                curr_rel_gap = (
+                    (total_sys_cost - min_sys_cost) / max(1.0, total_sys_cost)
+                    if total_sys_cost > 0
+                    else 0.0
+                )
+
+                if k >= 2 and curr_rel_gap <= msa_tol:
+                    self.last_relative_gaps_per_slice[t_slice] = float(curr_rel_gap)
+                    self.last_msa_iterations_per_slice[t_slice] = k
+                    break
+                else:
+                    self.last_relative_gaps_per_slice[t_slice] = float(curr_rel_gap)
+                    self.last_msa_iterations_per_slice[t_slice] = k
+
+                # 5. Update tentative flows for next MSA iteration
                 tentative_edge_flows.fill(0.0)
                 tentative_exit_flows = {d: 0.0 for d in destination_node_ids}
                 for dem, split in dem_assigned_split.items():
@@ -592,15 +700,28 @@ class TimeSlicedAssignmentEngine:
                         }
                     )
 
-            # Physical Queue Updating at End of Time Slice
+            # Physical Queue Updating at End of Time Slice with Link Storage Spillback
             for e_idx in range(num_edges):
                 cap_e = self.congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
-                slice_cap = cap_e * (time_slice_min / 60.0)
+                storage_e = self.congestion_model.edge_capacities[e_idx].storage_veh
+                if e_idx in closed_edge_indices:
+                    slice_cap = 0.0
+                else:
+                    slice_cap = cap_e * (time_slice_min / 60.0)
+
                 old_q = edge_queues[e_idx]
                 rem_q = max(0.0, old_q + edge_slice_flows[e_idx] - slice_cap)
                 edge_queues[e_idx] = rem_q
+
+                # Track physical link storage spillback
+                if rem_q > storage_e:
+                    self.congestion_model.edge_capacities[e_idx].has_spillback = True
+                    self.last_spillback_edges[e_idx] = max(
+                        self.last_spillback_edges.get(e_idx, 0.0), rem_q - storage_e
+                    )
+
                 avg_q = 0.5 * (old_q + rem_q)
-                q_del = (avg_q / cap_e) * 60.0 if cap_e > 0 else 0.0
+                q_del = (avg_q / cap_e) * 60.0 if cap_e > 0 else (120.0 if rem_q > 0 else 0.0)
                 edge_total_delays[e_idx] += q_del
                 if rem_q > 0:
                     self.last_edge_queues_over_time[e_idx][t_slice] = rem_q
@@ -697,25 +818,30 @@ class TimeSlicedAssignmentEngine:
         )
 
     def print_edge_queue_lengths(self, top_n: int = 15) -> None:
-        """Print table of maximum and persistent edge queue lengths and bottleneck locations."""
-        print(f"\n=== TOP {top_n} EDGE QUEUE BOTTLENECKS (Max Vehicles Queued) ===")
-        max_queues: list[tuple[int, float, str, str]] = []
+        """Print table of maximum and persistent edge queue lengths, storage capacity, and spillback."""
+        print(f"\n=== TOP {top_n} EDGE QUEUE BOTTLENECKS (Max Vehicles Queued & Storage) ===")
+        max_queues: list[tuple[int, float, float, bool, str, str]] = []
         for e_idx, time_dict in self.last_edge_queues_over_time.items():
             if time_dict:
                 max_q = max(time_dict.values())
                 ed = self.road_graph.edges[e_idx]
-                max_queues.append((e_idx, max_q, ed.name or "Unnamed", ed.highway))
+                cap_info = self.congestion_model.edge_capacities[e_idx]
+                spill = max_q > cap_info.storage_veh
+                max_queues.append(
+                    (e_idx, max_q, cap_info.storage_veh, spill, ed.name or "Unnamed", ed.highway)
+                )
 
         max_queues.sort(key=lambda x: -x[1])
         if not max_queues:
             print("No internal edge queues accumulated (all links within slice capacity).")
             return
 
-        header = f"{'Edge Index':<12} {'Max Queue (veh)':<18} {'Highway Type':<16} {'Road Name'}"
+        header = f"{'Edge Index':<12} {'Max Queue (veh)':<18} {'Storage Cap (veh)':<20} {'Spillback?':<12} {'Highway Type':<16} {'Road Name'}"
         print(header)
         print("-" * len(header))
-        for e_idx, max_q, name, hw in max_queues[:top_n]:
-            print(f"{e_idx:<12} {max_q:<18.1f} {hw:<16} {name}")
+        for e_idx, max_q, stor, spill, name, hw in max_queues[:top_n]:
+            spill_str = "YES" if spill else "NO"
+            print(f"{e_idx:<12} {max_q:<18.1f} {stor:<20.1f} {spill_str:<12} {hw:<16} {name}")
 
     def _compute_entrapment_metrics(
         self,

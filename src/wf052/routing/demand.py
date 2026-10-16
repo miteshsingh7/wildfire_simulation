@@ -8,6 +8,7 @@ Implements:
    times and response curves.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,19 @@ import numpy as np
 import yaml
 
 from wf052.routing.graph import RoadGraph
+
+
+@dataclass(frozen=True)
+class CensusBlockDemand:
+    """Census block vehicle demand with snapped road network origin node."""
+
+    geoid10: str
+    population: int
+    num_vehicles: int
+    assigned_zone: str
+    centroid_utm: tuple[float, float]
+    origin_node_id: int
+    departure_schedule: dict[float, int]
 
 
 @dataclass(frozen=True)
@@ -34,7 +48,7 @@ class EvacuationZone:
 
 @dataclass(frozen=True)
 class TimeSliceDemand:
-    """Vehicles departing a specific zone in a 5-minute time slice."""
+    """Vehicles departing a specific origin node in a 5-minute time slice."""
 
     zone_name: str
     slice_start_min: float
@@ -119,8 +133,15 @@ class EvacuationDemandModel:
 
         self.zones: dict[str, EvacuationZone] = {}
         self.departure_schedules: dict[str, dict[float, int]] = {}
+        self.block_demands: list[CensusBlockDemand] = []
+        self.node_vehicles: dict[int, int] = {}
+        self.max_per_node_load: int = 0
+        self.max_load_node_id: int = 0
+        self.unique_origin_nodes_count: int = 0
 
         self._initialize_zones(road_graph)
+        if road_graph is not None and len(road_graph.nodes) >= 100:
+            self._initialize_block_demands(road_graph)
 
     def _initialize_zones(self, road_graph: RoadGraph | None) -> None:
         """Parse zones, compute vehicle demands, and map to graph origin nodes."""
@@ -163,6 +184,164 @@ class EvacuationDemandModel:
                 time_slice_min=self.time_slice_min,
                 horizon_min=self.horizon_min,
             )
+
+    def _initialize_block_demands(self, road_graph: RoadGraph) -> None:
+        """Load census block centroids and map vehicles to nearest road graph origin nodes."""
+        blocks_path = Path("data/tiles/census2010_butte_blocks_pophu.parquet")
+        zones_path = Path("data/tiles/paradise_14_zones.parquet")
+        places_path = Path("data/raw/census2010_places/tl_2010_06_place10.shp")
+
+        if not blocks_path.exists():
+            return
+
+        import geopandas as gpd
+
+        node_ids = np.array(list(road_graph.nodes.keys()), dtype=np.int64)
+        node_coords = np.array([road_graph.nodes[nid] for nid in node_ids])
+
+        blocks_gdf = gpd.read_parquet(blocks_path).to_crs("EPSG:32610")
+
+        # Load 14 Paradise zones polygons
+        if not zones_path.exists():
+            from scripts.plot_paradise_zones_overlay import build_and_save_14_zones
+
+            zones_gdf, _, _ = build_and_save_14_zones()
+        else:
+            zones_gdf = gpd.read_parquet(zones_path)
+
+        town_poly = zones_gdf.union_all()
+        p_blocks = blocks_gdf[
+            blocks_gdf.geometry.centroid.within(town_poly) & (blocks_gdf["POP10"] > 0)
+        ].copy()
+
+        # CDPs: Magalia and Concow
+        m_blocks = gpd.GeoDataFrame()
+        c_blocks = gpd.GeoDataFrame()
+        if places_path.exists():
+            places = gpd.read_file(places_path).to_crs("EPSG:32610")
+            mag_poly = places[places["NAMELSAD10"] == "Magalia CDP"].iloc[0].geometry
+            con_poly = places[places["NAMELSAD10"] == "Concow CDP"].iloc[0].geometry
+            m_blocks = blocks_gdf[
+                blocks_gdf.geometry.centroid.within(mag_poly) & (blocks_gdf["POP10"] > 0)
+            ].copy()
+            c_blocks = blocks_gdf[
+                blocks_gdf.geometry.centroid.within(con_poly) & (blocks_gdf["POP10"] > 0)
+            ].copy()
+
+        block_demands: list[CensusBlockDemand] = []
+        node_vehicles: dict[int, int] = defaultdict(int)
+
+        # Process Paradise blocks
+        for _, blk in p_blocks.iterrows():
+            b_pt = blk.geometry.centroid
+            pop = int(blk["POP10"])
+            n_veh = max(1, int(np.round(pop / self.occupancy)))
+
+            # Find assigned zone
+            assigned_z = "Zone_1"
+            for _, z_row in zones_gdf.iterrows():
+                if z_row.geometry.contains(b_pt):
+                    assigned_z = z_row.zone_name
+                    break
+
+            # Snap to nearest road node
+            dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
+            snapped_nid = int(node_ids[np.argmin(dists)])
+
+            z_obj = self.zones.get(assigned_z, self.zones.get("Zone_1"))
+            notif_t = z_obj.notification_elapsed_min if z_obj else 60.0
+            dur_t = z_obj.departure_duration_min if z_obj else 90.0
+
+            sched = calculate_departure_schedule(
+                total_vehicles=n_veh,
+                notification_min=notif_t,
+                duration_min=dur_t,
+                time_slice_min=self.time_slice_min,
+                horizon_min=self.horizon_min,
+            )
+
+            block_demands.append(
+                CensusBlockDemand(
+                    geoid10=str(blk["GEOID10"]),
+                    population=pop,
+                    num_vehicles=n_veh,
+                    assigned_zone=assigned_z,
+                    centroid_utm=(float(b_pt.x), float(b_pt.y)),
+                    origin_node_id=snapped_nid,
+                    departure_schedule=sched,
+                )
+            )
+            node_vehicles[snapped_nid] += n_veh
+
+        # Process Magalia blocks
+        if len(m_blocks) > 0 and "Magalia" in self.zones:
+            z_mag = self.zones["Magalia"]
+            for _, blk in m_blocks.iterrows():
+                b_pt = blk.geometry.centroid
+                pop = int(blk["POP10"])
+                n_veh = max(1, int(np.round(pop / self.occupancy)))
+                dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
+                snapped_nid = int(node_ids[np.argmin(dists)])
+                sched = calculate_departure_schedule(
+                    total_vehicles=n_veh,
+                    notification_min=z_mag.notification_elapsed_min,
+                    duration_min=z_mag.departure_duration_min,
+                    time_slice_min=self.time_slice_min,
+                    horizon_min=self.horizon_min,
+                )
+                block_demands.append(
+                    CensusBlockDemand(
+                        geoid10=str(blk["GEOID10"]),
+                        population=pop,
+                        num_vehicles=n_veh,
+                        assigned_zone="Magalia",
+                        centroid_utm=(float(b_pt.x), float(b_pt.y)),
+                        origin_node_id=snapped_nid,
+                        departure_schedule=sched,
+                    )
+                )
+                node_vehicles[snapped_nid] += n_veh
+
+        # Process Concow blocks
+        if len(c_blocks) > 0 and "Concow" in self.zones:
+            z_con = self.zones["Concow"]
+            for _, blk in c_blocks.iterrows():
+                b_pt = blk.geometry.centroid
+                pop = int(blk["POP10"])
+                n_veh = max(1, int(np.round(pop / self.occupancy)))
+                dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
+                snapped_nid = int(node_ids[np.argmin(dists)])
+                sched = calculate_departure_schedule(
+                    total_vehicles=n_veh,
+                    notification_min=z_con.notification_elapsed_min,
+                    duration_min=z_con.departure_duration_min,
+                    time_slice_min=self.time_slice_min,
+                    horizon_min=self.horizon_min,
+                )
+                block_demands.append(
+                    CensusBlockDemand(
+                        geoid10=str(blk["GEOID10"]),
+                        population=pop,
+                        num_vehicles=n_veh,
+                        assigned_zone="Concow",
+                        centroid_utm=(float(b_pt.x), float(b_pt.y)),
+                        origin_node_id=snapped_nid,
+                        departure_schedule=sched,
+                    )
+                )
+                node_vehicles[snapped_nid] += n_veh
+
+        # Pulga point demand
+        if "Pulga" in self.zones:
+            z_pulga = self.zones["Pulga"]
+            node_vehicles[z_pulga.origin_node_id] += z_pulga.num_vehicles
+
+        self.block_demands = block_demands
+        self.node_vehicles = dict(node_vehicles)
+        if self.node_vehicles:
+            self.max_load_node_id = max(self.node_vehicles, key=self.node_vehicles.get)
+            self.max_per_node_load = self.node_vehicles[self.max_load_node_id]
+            self.unique_origin_nodes_count = len(self.node_vehicles)
 
     def get_total_population(self) -> int:
         """Return total regional population across all zones."""
@@ -216,9 +395,68 @@ class EvacuationDemandModel:
             )
         self.zones = new_zones
 
+        # Shift block departure schedules
+        if self.block_demands:
+            new_blocks = []
+            for blk in self.block_demands:
+                z_obj = self.zones.get(blk.assigned_zone)
+                notif_t = z_obj.notification_elapsed_min if z_obj else 60.0
+                dur_t = z_obj.departure_duration_min if z_obj else 90.0
+                new_sched = calculate_departure_schedule(
+                    total_vehicles=blk.num_vehicles,
+                    notification_min=notif_t,
+                    duration_min=dur_t,
+                    time_slice_min=self.time_slice_min,
+                    horizon_min=self.horizon_min,
+                )
+                new_blocks.append(
+                    CensusBlockDemand(
+                        geoid10=blk.geoid10,
+                        population=blk.population,
+                        num_vehicles=blk.num_vehicles,
+                        assigned_zone=blk.assigned_zone,
+                        centroid_utm=blk.centroid_utm,
+                        origin_node_id=blk.origin_node_id,
+                        departure_schedule=new_sched,
+                    )
+                )
+            self.block_demands = new_blocks
+
     def get_slices_demand(self) -> list[TimeSliceDemand]:
         """Return flattened list of all time-slice demands sorted chronologically."""
-        demands: list[TimeSliceDemand] = []
+        if self.block_demands:
+            # Group block schedules by (assigned_zone, origin_node_id, slice_start_min)
+            node_sched: dict[tuple[str, int, float], int] = defaultdict(int)
+            for blk in self.block_demands:
+                for t_start, cnt in blk.departure_schedule.items():
+                    if cnt > 0:
+                        node_sched[(blk.assigned_zone, blk.origin_node_id, t_start)] += cnt
+
+            # Add Pulga if not in blocks
+            if "Pulga" in self.zones and not any(
+                b.assigned_zone == "Pulga" for b in self.block_demands
+            ):
+                z_pulga = self.zones["Pulga"]
+                for t_start, cnt in self.departure_schedules.get("Pulga", {}).items():
+                    if cnt > 0:
+                        node_sched[("Pulga", z_pulga.origin_node_id, t_start)] += cnt
+
+            demands = [
+                TimeSliceDemand(
+                    zone_name=z_name,
+                    slice_start_min=t_start,
+                    slice_end_min=t_start + self.time_slice_min,
+                    vehicle_count=cnt,
+                    origin_node_id=nid,
+                )
+                for (z_name, nid, t_start), cnt in node_sched.items()
+                if cnt > 0
+            ]
+            demands.sort(key=lambda d: (d.slice_start_min, d.zone_name, d.origin_node_id))
+            return demands
+
+        # Fallback to zone centroids
+        demands = []
         for name, sched in self.departure_schedules.items():
             node_id = self.zones[name].origin_node_id
             for t_start, cnt in sched.items():

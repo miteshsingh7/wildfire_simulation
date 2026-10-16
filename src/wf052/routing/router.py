@@ -195,6 +195,8 @@ class TimeDependentRouter:
         buffer_minutes: float = 15.0,
         edge_fire_arrivals: np.ndarray | None = None,
         mode: RoutingMode = RoutingMode.FASTEST_SAFE,
+        dynamic_edge_traversal_times: np.ndarray | None = None,
+        destination_exit_delays: dict[int, float] | None = None,
     ) -> EvacuationRoute | None:
         """Find an evacuation route from origin to any destination.
 
@@ -222,6 +224,8 @@ class TimeDependentRouter:
                 t0=t0,
                 buffer_minutes=buffer_minutes,
                 edge_fire_arrivals=edge_fire_arrivals,
+                dynamic_edge_traversal_times=dynamic_edge_traversal_times,
+                destination_exit_delays=destination_exit_delays,
             )
             if best_dest is not None:
                 return _reconstruct_route(
@@ -233,6 +237,7 @@ class TimeDependentRouter:
                     edge_fire_arrivals=edge_fire_arrivals,
                     status=RouteStatus.SAFE,
                     mode_used=RoutingMode.FASTEST_SAFE,
+                    dynamic_edge_traversal_times=dynamic_edge_traversal_times,
                 )
 
         # 2. Mode (b): Maximize minimum safety margin via monotone binary search
@@ -244,6 +249,8 @@ class TimeDependentRouter:
             t0=t0,
             buffer_minutes=-1e9,
             edge_fire_arrivals=edge_fire_arrivals,
+            dynamic_edge_traversal_times=dynamic_edge_traversal_times,
+            destination_exit_delays=destination_exit_delays,
         )
         if unconstrained_dest is None:
             # Physically disconnected graph
@@ -266,6 +273,8 @@ class TimeDependentRouter:
                 t0=t0,
                 buffer_minutes=m_mid,
                 edge_fire_arrivals=edge_fire_arrivals,
+                dynamic_edge_traversal_times=dynamic_edge_traversal_times,
+                destination_exit_delays=destination_exit_delays,
             )
             if test_dest is not None:
                 m_low = m_mid
@@ -284,4 +293,5 @@ class TimeDependentRouter:
             edge_fire_arrivals=edge_fire_arrivals,
             status=RouteStatus.BEST_EFFORT,
             mode_used=RoutingMode.MAX_MIN_MARGIN,
+            dynamic_edge_traversal_times=dynamic_edge_traversal_times,
         )
