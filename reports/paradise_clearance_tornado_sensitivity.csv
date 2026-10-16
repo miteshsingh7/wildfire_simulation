@@ -1,0 +1,11 @@
+Scenario / Parameter,Clearance (h),Delta vs Baseline (h),Paradise North (h),Paradise Central (h),Paradise East (h),Paradise South (h)
+Baseline (Nominal),10.4,0.0,10.4,10.36,9.67,10.37
+Capacity Scale = 0.7 (-30% link cap),10.4,0.0,10.4,10.36,9.67,10.37
+Capacity Scale = 0.5 (-50% link cap),10.4,0.0,10.4,10.36,9.67,10.37
+Inbound Traffic = 200 veh/hr,10.4,0.0,10.4,10.36,9.67,10.37
+"Skyway Exit Cap -30% (1,540 veh/hr)",15.68,5.29,15.68,15.64,14.1,15.66
+Clark Exit Cap -30% (980 veh/hr),10.4,0.0,10.4,10.36,9.67,10.37
+Pentz Exit Cap -30% (700 veh/hr),10.4,0.0,10.4,10.36,9.67,10.37
+All Exits -30% Outflow,15.68,5.29,15.68,15.64,14.1,15.66
+Skyway Contraflow = ON (2x capacity),10.4,0.0,10.4,10.36,9.67,10.37
+Compound Worst-Case (Scale 0.5 + Inbound 200 + Exits -30%),15.68,5.29,15.68,15.64,14.1,15.66

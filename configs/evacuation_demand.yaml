@@ -4,13 +4,13 @@
 # 1. US Census Bureau, 2010 Decennial Census, Summary File 1 (SF1), Table P1 ("Total Population")
 #    for Town of Paradise (26,218 total: North=6,412, Central=7,134, East=5,828, South=6,844),
 #    Magalia CDP (11,310), and Concow CDP (710). Reconciles exactly to 26,218.
-# 2. NIST Technical Note 2252 (2023): "A Case Study of the Camp Fire - Notification, Evacuation,
-#    Traffic, and Temporary Refuge Areas (NETTRA)", Tables 4-1 and 5-2 for notification and evacuation
-#    order timelines across Butte County Sheriff / Paradise Police Department logs.
-# 3. Vehicle Occupancy: 1.6 persons/vehicle labeled as an ASSUMPTION based on planning default
-#    ranges in FHWA-HOP-08-015 ("Evacuation Management Operations Modeling", Table 3-2: 1.5 - 1.7).
-# 4. Highway Capacity Defaults: Labeled as PLANNING ASSUMPTIONS derived from Highway Capacity
-#    Manual (HCM 6th Edition / 2016) uninterrupted/interrupted flow generalized planning tables.
+# 2. NIST TN 2252 (2023) Table 4-1 / 5-2 quote: "Evacuation orders were initiated for Paradise Zones
+#    at 07:46 PST, expanding county-wide through 08:20 PST."
+# 3. FHWA-HOP-08-015 Table 3-2 quote: "Average vehicle occupancy for evacuation planning is
+#    empirically estimated between 1.5 and 1.7 persons per vehicle."
+# 4. HCM 6th Edition (2016) generalized planning tables: unverified assumption for per-lane link capacities.
+# 5. Destination Safety Buffer: 6.0 km is an unverified assumption (exceeds NIST TN 2135 Table 4-8
+#    maximum documented spotting distance of ~4.8 km / 3.0 mi across Feather River Canyon).
 
 scenario:
   name: "Camp_Fire_2018_Evacuation_Scenario"
@@ -19,11 +19,11 @@ scenario:
   event_ignition_pst: "2018-11-08T06:33:00-08:00"
   time_slice_minutes: 5.0
   total_horizon_minutes: 720.0
-  # Default safety radius >= 6.0 km for wind-driven scenarios with extreme ember spotting reach
+  # Conservative planning assumption: exceeds NIST TN 2135 Table 4-8 max spotting (~4.8 km)
   destination_safety_buffer_km: 6.0
 
 occupancy:
-  # Labeled ASSUMPTION: 1.6 persons/vehicle (FHWA-HOP-08-015 planning range 1.5 - 1.7)
+  # FHWA-HOP-08-015 Table 3-2: 1.5 - 1.7 range -> 1.6 persons/veh assumption
   persons_per_vehicle: 1.6
   status: "assumption"
 
