@@ -30,18 +30,20 @@ def _run_constrained_dijkstra(
     t0: float,
     buffer_minutes: float,
     edge_fire_arrivals: np.ndarray,
+    dynamic_edge_traversal_times: np.ndarray | None = None,
+    destination_exit_delays: dict[int, float] | None = None,
+    settle_all_destinations: bool = False,
 ) -> tuple[int | None, dict[int, float], dict[int, tuple[int, int]]]:
     """Single-source FIFO Dijkstra constrained by edge_exit_time + buffer <= edge_fire_arrival.
 
-    Returns:
-        (best_dest, earliest_arrival, parent_map)
-        best_dest is None if no destination is reachable under the margin constraint.
+    Supports dynamic congested edge traversal times and destination boundary exit queue delays.
     """
     # Priority queue stores (arrival_time_at_u, u)
     pq: list[tuple[float, int]] = [(t0, origin_node)]
     earliest_arrival: dict[int, float] = {origin_node: t0}
     parent: dict[int, tuple[int, int]] = {}  # v -> (u, edge_idx)
 
+    reached_dests: set[int] = set()
     best_dest: int | None = None
 
     while pq:
@@ -51,11 +53,20 @@ def _run_constrained_dijkstra(
             continue
 
         if u in destination_nodes:
-            best_dest = u
-            break
+            reached_dests.add(u)
+            if not settle_all_destinations and destination_exit_delays is None:
+                best_dest = u
+                break
+            if len(reached_dests) == len(destination_nodes):
+                break
 
         for v, _k, dt_min, edge_idx in road_graph.adj.get(u, []):
-            t_exit = t_u + dt_min
+            dt = (
+                float(dynamic_edge_traversal_times[edge_idx])
+                if dynamic_edge_traversal_times is not None
+                else dt_min
+            )
+            t_exit = t_u + dt
             fire_arr = float(edge_fire_arrivals[edge_idx])
 
             # FIFO Safety Condition: exit_time + buffer <= edge fire arrival
@@ -64,6 +75,16 @@ def _run_constrained_dijkstra(
                     earliest_arrival[v] = t_exit
                     parent[v] = (u, edge_idx)
                     heapq.heappush(pq, (t_exit, v))
+
+    if reached_dests:
+        if destination_exit_delays is not None:
+            # Select destination minimizing total travel time + boundary exit queue delay
+            best_dest = min(
+                reached_dests,
+                key=lambda d: earliest_arrival[d] + destination_exit_delays.get(d, 0.0),
+            )
+        else:
+            best_dest = min(reached_dests, key=lambda d: earliest_arrival[d])
 
     return best_dest, earliest_arrival, parent
 
@@ -77,8 +98,9 @@ def _reconstruct_route(
     edge_fire_arrivals: np.ndarray,
     status: RouteStatus,
     mode_used: RoutingMode,
+    dynamic_edge_traversal_times: np.ndarray | None = None,
 ) -> EvacuationRoute:
-    """Reconstruct an EvacuationRoute from the Dijkstra parent trace."""
+    """Reconstruct an EvacuationRoute from the Dijkstra parent trace with congested traversal times."""
     # Trace backward from dest_node to origin_node
     curr = dest_node
     edge_indices_rev: list[int] = []
@@ -102,8 +124,13 @@ def _reconstruct_route(
 
     for e_idx in edge_indices:
         ed = road_graph.edges[e_idx]
+        dt = (
+            float(dynamic_edge_traversal_times[e_idx])
+            if dynamic_edge_traversal_times is not None
+            else ed.traversal_time_min
+        )
         entry_t = curr_t
-        exit_t = entry_t + ed.traversal_time_min
+        exit_t = entry_t + dt
         fire_arr = float(edge_fire_arrivals[e_idx])
         margin = fire_arr - exit_t
 
@@ -111,14 +138,16 @@ def _reconstruct_route(
             min_margin = margin
             bottleneck_edge = (ed.u, ed.v, ed.key)
 
+        spd_mps = (ed.length_m / (dt * 60.0)) if dt > 0 else ed.speed_mps
+
         route_edges.append(
             RouteEdge(
                 u=ed.u,
                 v=ed.v,
                 key=ed.key,
                 length_m=ed.length_m,
-                speed_mps=ed.speed_mps,
-                traversal_time_min=ed.traversal_time_min,
+                speed_mps=spd_mps,
+                traversal_time_min=dt,
                 entry_time_min=entry_t,
                 exit_time_min=exit_t,
                 fire_arrival_min=fire_arr,
@@ -131,7 +160,6 @@ def _reconstruct_route(
     total_travel_time = curr_t - t0
     geom_wkt = None
     if geoms:
-        # Combine into MultiLineString or LineString
         try:
             geom_wkt = shapely.geometry.MultiLineString(geoms).wkt
         except Exception:

@@ -12,13 +12,9 @@ Computes and reports:
 """
 
 import ast
-import json
-from pathlib import Path
 
 import geopandas as gpd
 import networkx as nx
-import numpy as np
-import osmnx as ox
 import pandas as pd
 import shapely.geometry
 
@@ -73,9 +69,9 @@ def audit_graph_integrity(
     edges_gdf: gpd.GeoDataFrame,
     graph_name: str,
 ) -> dict:
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f" INTEGRITY AUDIT: {graph_name.upper()}")
-    print(f"=======================================================")
+    print("=======================================================")
     print(f"Total Nodes: {len(nodes_gdf)}")
     print(f"Total Edges: {len(edges_gdf)}")
 

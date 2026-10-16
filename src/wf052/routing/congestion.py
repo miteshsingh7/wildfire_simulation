@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import yaml
 
-from wf052.routing.contracts import EvacuationRoute, RouteStatus, RoutingMode
+from wf052.routing.contracts import RouteStatus, RoutingMode
 from wf052.routing.demand import EvacuationDemandModel
 from wf052.routing.graph import RoadGraph
 from wf052.routing.router import TimeDependentRouter
@@ -196,9 +196,65 @@ class CongestionModel:
             bpr_delay = congested_t - t_free
             return congested_t, bpr_delay, 0.0
 
+    def get_exit_outflow_capacity(self, dest_node: int, dest_name: str | None = None) -> float:
+        """Look up outflow capacity for a boundary destination exit."""
+        if dest_name is None:
+            for name, nid in self.road_graph.boundary_destinations.items():
+                if nid == dest_node:
+                    dest_name = name
+                    break
+            if dest_name is None:
+                dest_name = ""
+
+        d_lower = dest_name.lower()
+        # Direct exact or sanitized key match first
+        if d_lower in self.exit_outflow_capacities:
+            return float(self.exit_outflow_capacities[d_lower])
+        if f"{d_lower}_exit" in self.exit_outflow_capacities:
+            return float(self.exit_outflow_capacities[f"{d_lower}_exit"])
+
+        # Keyword mapping for Camp Fire primary evacuation corridors
+        if "skyway" in d_lower or "chico" in d_lower:
+            return float(self.exit_outflow_capacities.get("skyway_south_exit", 1600.0))
+        elif "clark" in d_lower:
+            return float(self.exit_outflow_capacities.get("clark_south_exit", 1200.0))
+        elif "pentz" in d_lower or "oroville" in d_lower:
+            return float(self.exit_outflow_capacities.get("pentz_south_exit", 1000.0))
+        elif "70" in d_lower or "feather" in d_lower:
+            return float(self.exit_outflow_capacities.get("highway_70_south_exit", 1400.0))
+        else:
+            return float(self.exit_outflow_capacities.get("fallback_exit", 1000.0))
+
+    def get_exit_commute_traffic(self, dest_node: int, dest_name: str | None = None) -> float:
+        """Return background commute traffic reducing exit merge capacity (NIST TN 2252 sup Table A-2 TD-086)."""
+        commute = float(
+            self.cfg.get("background_commute_traffic", {}).get(
+                "chico_ca99_commute_veh_per_hr", 500.0
+            )
+        )
+        if dest_name is None:
+            for name, nid in self.road_graph.boundary_destinations.items():
+                if nid == dest_node:
+                    dest_name = name
+                    break
+            if dest_name is None:
+                dest_name = ""
+        d_lower = dest_name.lower()
+        if "chico" in d_lower or "skyway" in d_lower:
+            return commute
+        return 0.0
+
 
 class TimeSlicedAssignmentEngine:
-    """Executes dynamic time-sliced incremental evacuation traffic assignment."""
+    """Executes dynamic time-sliced incremental evacuation traffic assignment with queue-aware routing.
+
+    Implements:
+    1. Dynamic FIFO Dijkstra path evaluation incorporating internal link queuing delays.
+    2. Boundary exit outflow bottleneck delays entering path utility costs.
+    3. Multi-destination Logit / MSA equilibrium flow splitting across egress corridors.
+    4. Sub-horizon replanning (t >= t_now).
+    5. Quantitative tracking of vehicles exiting per corridor over time and per-edge queue lengths.
+    """
 
     def __init__(
         self,
@@ -212,6 +268,22 @@ class TimeSlicedAssignmentEngine:
         self.congestion_model = congestion_model
         self.router = router
 
+        # Persistent diagnostics from last assignment run
+        self.last_vehicles_per_exit_over_time: dict[str, dict[float, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        self.last_vehicles_per_exit_by_id: dict[int, dict[float, int]] = defaultdict(
+            lambda: defaultdict(int)
+        )
+        self.last_edge_queues: np.ndarray = np.zeros(len(self.road_graph.edges), dtype=np.float64)
+        self.last_edge_queues_over_time: dict[int, dict[float, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        self.last_cohort_trajectories: list[dict[str, Any]] = []
+        self.last_edge_total_delays: np.ndarray = np.zeros(
+            len(self.road_graph.edges), dtype=np.float64
+        )
+
     def run_assignment(
         self,
         edge_fire_arrivals: np.ndarray,
@@ -220,19 +292,36 @@ class TimeSlicedAssignmentEngine:
         free_flow_mode: bool = False,
         danger_buffer_minutes: float = 15.0,
         apply_exit_capacities: bool = True,
+        t_now: float = 0.0,
+        theta: float = 0.15,
+        msa_iterations: int = 4,
     ) -> tuple[dict[str, ZoneClearanceSummary], EntrapmentMetrics]:
         """Execute dynamic 5-minute time-sliced traffic assignment across all zones.
+
+        Args:
+            edge_fire_arrivals: (E,) array of fire arrival times.
+            destination_node_ids: Set of domain boundary destination node IDs.
+            buffer_minutes: Safety margin threshold B in minutes.
+            free_flow_mode: If True, disables queue delays and uses pure free-flow.
+            danger_buffer_minutes: Exposure danger buffer for entrapment metrics.
+            apply_exit_capacities: If True, applies finite exit outflow bottlenecks.
+            t_now: Re-assign only from 'now' forward (t_slice >= t_now).
+            theta: Logit choice dispersion parameter (sensitivity to travel + queue delay differences).
+            msa_iterations: Method of Successive Averages iterations for flow balancing.
 
         Returns:
             (summaries_dict, entrapment_metrics)
         """
+        from wf052.routing.router import _reconstruct_route, _run_constrained_dijkstra
+
         time_slice_min = self.demand_model.time_slice_min
         slices_demand = self.demand_model.get_slices_demand()
 
         # Group demands by slice start time
         demands_by_time: dict[float, list[Any]] = defaultdict(list)
         for dem in slices_demand:
-            demands_by_time[dem.slice_start_min].append(dem)
+            if dem.slice_start_min >= t_now:
+                demands_by_time[dem.slice_start_min].append(dem)
 
         all_times = sorted(demands_by_time.keys())
         num_edges = len(self.road_graph.edges)
@@ -245,111 +334,308 @@ class TimeSlicedAssignmentEngine:
         # Boundary exit queue tracking
         exit_queues: dict[int, float] = defaultdict(float)
 
-        # Vehicle tracking per zone: list of (departure_t, exit_arrival_t, min_margin, safe_flag)
-        zone_vehicle_results: dict[str, list[tuple[float, float, float, bool]]] = defaultdict(list)
+        # Vehicle tracking per zone: list of (departure_t, exit_arrival_t, min_margin, safe_flag, count)
+        zone_vehicle_results: dict[str, list[tuple[float, float, float, bool, int]]] = defaultdict(
+            list
+        )
 
-        # Cohort trajectories: list of dict(zone, num_vehicles, intervals=[(e_idx, t_enter, t_exit)])
+        # Detailed tracking
+        self.last_vehicles_per_exit_over_time = defaultdict(lambda: defaultdict(int))
+        self.last_vehicles_per_exit_by_id = defaultdict(lambda: defaultdict(int))
+        self.last_edge_queues_over_time = defaultdict(lambda: defaultdict(float))
         cohort_trajectories: list[dict[str, Any]] = []
 
         # Fast edge lookup: (u, v, key) -> edge_idx
         edge_lookup = {(e.u, e.v, e.key): e.edge_idx for e in self.road_graph.edges}
+        dest_node_to_name = {
+            nid: name for name, nid in self.road_graph.boundary_destinations.items()
+        }
+
+        # Compute effective exit capacities
+        effective_exit_capacities: dict[int, float] = {}
+        for d in destination_node_ids:
+            cap = self.congestion_model.get_exit_outflow_capacity(d)
+            commute = self.congestion_model.get_exit_commute_traffic(d)
+            effective_exit_capacities[d] = max(100.0, cap - commute)
 
         for t_slice in all_times:
-            # 1. Update edge traversal delays based on current congestion
-            if not free_flow_mode:
-                for e_idx in range(num_edges):
-                    congested_t, queue_delay, rem_q = self.congestion_model.compute_congested_time(
-                        edge_idx=e_idx,
-                        flow_veh=edge_slice_flows[e_idx],
-                        time_slice_min=time_slice_min,
-                        preexisting_queue=edge_queues[e_idx],
-                    )
-                    edge_queues[e_idx] = rem_q
-                    edge_total_delays[e_idx] += queue_delay
-            else:
-                edge_queues.fill(0.0)
-
-            # Reset slice flow accumulators
-            edge_slice_flows.fill(0.0)
-
-            # 2. Assign demands departing in this slice
             slice_demands = demands_by_time[t_slice]
+            total_slice_demand = sum(d.vehicle_count for d in slice_demands)
+
+            if (
+                total_slice_demand <= 0
+                and np.all(edge_queues <= 0)
+                and all(q <= 0 for q in exit_queues.values())
+            ):
+                continue
+
+            # Free-flow vs. Congested Mode assignment
+            if free_flow_mode:
+                edge_slice_flows.fill(0.0)
+                for dem in slice_demands:
+                    cnt = dem.vehicle_count
+                    if cnt <= 0:
+                        continue
+                    route = self.router.find_route(
+                        origin_node=dem.origin_node_id,
+                        destination_nodes=destination_node_ids,
+                        t0=t_slice,
+                        buffer_minutes=buffer_minutes,
+                        edge_fire_arrivals=edge_fire_arrivals,
+                        mode=RoutingMode.FASTEST_SAFE,
+                    )
+                    if route is not None and len(route.edges) > 0:
+                        dest_node = route.destination_id
+                        final_arrival_t = route.arrival_time_min
+                        is_safe = (route.status == RouteStatus.SAFE) and (
+                            route.min_margin_min >= 0.0
+                        )
+                        zone_vehicle_results[dem.zone_name].append(
+                            (t_slice, final_arrival_t, route.min_margin_min, is_safe, cnt)
+                        )
+                        dest_name = dest_node_to_name.get(dest_node, str(dest_node))
+                        self.last_vehicles_per_exit_over_time[dest_name][t_slice] += cnt
+                        self.last_vehicles_per_exit_by_id[dest_node][t_slice] += cnt
+
+                        intervals = []
+                        for re in route.edges:
+                            cand_idx = edge_lookup.get((re.u, re.v, re.key))
+                            if cand_idx is not None:
+                                edge_slice_flows[cand_idx] += cnt
+                                intervals.append((cand_idx, re.entry_time_min, re.exit_time_min))
+                        cohort_trajectories.append(
+                            {
+                                "zone_name": dem.zone_name,
+                                "destination_id": dest_node,
+                                "num_vehicles": cnt,
+                                "intervals": intervals,
+                            }
+                        )
+                continue
+
+            # CONGESTED QUEUE-AWARE ASSIGNMENT WITH MSA LOGIT FLOW SPLITTING
+            tentative_edge_flows = np.zeros(num_edges, dtype=np.float64)
+            tentative_exit_flows: dict[int, float] = {d: 0.0 for d in destination_node_ids}
+            dem_assigned_split: dict[Any, dict[int, float]] = {}
+            dem_parents: dict[Any, dict[int, tuple[int, int]]] = {}
+            dem_reached: dict[Any, list[int]] = {}
+
+            k_max = max(1, msa_iterations)
+            for k in range(1, k_max + 1):
+                alpha_k = 1.0 / float(k)
+
+                # 1. Update dynamic edge traversal times (t_free + queue_delay)
+                dyn_edge_times = np.zeros(num_edges, dtype=np.float64)
+                for e_idx in range(num_edges):
+                    cap_e = self.congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
+                    q_e = edge_queues[e_idx] + 0.5 * tentative_edge_flows[e_idx]
+                    q_delay = (q_e / cap_e) * 60.0 if cap_e > 0 else 0.0
+                    dyn_edge_times[e_idx] = (
+                        self.congestion_model.edge_capacities[e_idx].free_traversal_time_min
+                        + q_delay
+                    )
+
+                # 2. Update boundary exit bottleneck delays
+                exit_delays: dict[int, float] = {}
+                for d in destination_node_ids:
+                    if apply_exit_capacities:
+                        cap_d = effective_exit_capacities[d]
+                        q_d = exit_queues.get(d, 0.0) + 0.5 * tentative_exit_flows.get(d, 0.0)
+                        exit_delays[d] = (q_d / cap_d) * 60.0
+                    else:
+                        exit_delays[d] = 0.0
+
+                # 3. Settle all destinations via FIFO Dijkstra & compute Logit choice probabilities
+                for dem in slice_demands:
+                    cnt = dem.vehicle_count
+                    if cnt <= 0:
+                        continue
+
+                    # Try constrained fastest safe route to all destinations
+                    _best_dest, earliest_arrival, parent = _run_constrained_dijkstra(
+                        road_graph=self.road_graph,
+                        origin_node=dem.origin_node_id,
+                        destination_nodes=destination_node_ids,
+                        t0=t_slice,
+                        buffer_minutes=buffer_minutes,
+                        edge_fire_arrivals=edge_fire_arrivals,
+                        dynamic_edge_traversal_times=dyn_edge_times,
+                        destination_exit_delays=exit_delays,
+                        settle_all_destinations=True,
+                    )
+                    reached_dests = [d for d in destination_node_ids if d in earliest_arrival]
+
+                    # Fallback to unconstrained reachability if fire cuts all safe routes
+                    if not reached_dests:
+                        _best_dest, earliest_arrival, parent = _run_constrained_dijkstra(
+                            road_graph=self.road_graph,
+                            origin_node=dem.origin_node_id,
+                            destination_nodes=destination_node_ids,
+                            t0=t_slice,
+                            buffer_minutes=-1e9,
+                            edge_fire_arrivals=edge_fire_arrivals,
+                            dynamic_edge_traversal_times=dyn_edge_times,
+                            destination_exit_delays=exit_delays,
+                            settle_all_destinations=True,
+                        )
+                        reached_dests = [d for d in destination_node_ids if d in earliest_arrival]
+
+                    if not reached_dests:
+                        continue
+
+                    dem_parents[dem] = parent
+                    dem_reached[dem] = reached_dests
+
+                    # Cost = path travel time + boundary exit bottleneck queue delay
+                    costs = np.array(
+                        [
+                            (earliest_arrival[d] - t_slice) + exit_delays.get(d, 0.0)
+                            for d in reached_dests
+                        ]
+                    )
+                    v = -theta * costs
+                    v_norm = v - np.max(v)
+                    probs = np.exp(v_norm) / np.sum(np.exp(v_norm))
+                    aux_split = {
+                        d: float(cnt * p) for d, p in zip(reached_dests, probs, strict=True)
+                    }
+
+                    if k == 1:
+                        dem_assigned_split[dem] = aux_split
+                    else:
+                        curr_split = dem_assigned_split.get(dem, {})
+                        dem_assigned_split[dem] = {
+                            d: (1.0 - alpha_k) * curr_split.get(d, 0.0)
+                            + alpha_k * aux_split.get(d, 0.0)
+                            for d in reached_dests
+                        }
+
+                # 4. Update tentative flows for next MSA iteration
+                tentative_edge_flows.fill(0.0)
+                tentative_exit_flows = {d: 0.0 for d in destination_node_ids}
+                for dem, split in dem_assigned_split.items():
+                    parent = dem_parents.get(dem, {})
+                    for d, flow_d in split.items():
+                        if flow_d <= 0.0:
+                            continue
+                        tentative_exit_flows[d] += flow_d
+                        curr = d
+                        while curr != dem.origin_node_id and curr in parent:
+                            p_node, e_idx = parent[curr]
+                            tentative_edge_flows[e_idx] += flow_d
+                            curr = p_node
+
+            # Finalize integer vehicle assignments across reached corridors
+            edge_slice_flows.fill(0.0)
+            exit_slice_flows: dict[int, float] = {d: 0.0 for d in destination_node_ids}
+
             for dem in slice_demands:
                 cnt = dem.vehicle_count
-                if cnt <= 0:
+                if cnt <= 0 or dem not in dem_assigned_split:
                     continue
 
-                route: EvacuationRoute | None = self.router.find_route(
-                    origin_node=dem.origin_node_id,
-                    destination_nodes=destination_node_ids,
-                    t0=t_slice,
-                    buffer_minutes=buffer_minutes,
-                    edge_fire_arrivals=edge_fire_arrivals,
-                    mode=RoutingMode.FASTEST_SAFE,
-                )
+                split = dem_assigned_split[dem]
+                d_list = list(split.keys())
+                exact_vals = np.array([split[d] for d in d_list], dtype=np.float64)
+                floor_vals = np.floor(exact_vals).astype(int)
+                rem = cnt - int(np.sum(floor_vals))
+                if rem > 0:
+                    fracs = exact_vals - floor_vals
+                    top_indices = np.argsort(-fracs)[:rem]
+                    for idx in top_indices:
+                        floor_vals[idx] += 1
 
-                if route is not None and len(route.edges) > 0:
-                    dest_node = route.destination_id
-                    base_arrival_t = route.arrival_time_min
+                for d, n_d in zip(d_list, floor_vals, strict=True):
+                    if n_d <= 0:
+                        continue
 
-                    # Apply boundary exit outflow capacity bottleneck delay
-                    exit_delay = 0.0
-                    if apply_exit_capacities and not free_flow_mode:
-                        exit_cap_hr = float(
-                            self.congestion_model.exit_outflow_capacities.get(
-                                "fallback_exit", 1000.0
-                            )
-                        )
-                        # Check if named destination has explicit capacity
-                        slice_exit_cap = exit_cap_hr * (time_slice_min / 60.0)
-                        q_exit = exit_queues[dest_node] + cnt
-                        rem_exit_q = max(0.0, q_exit - slice_exit_cap)
-                        exit_queues[dest_node] = rem_exit_q
-                        exit_delay = (
-                            0.5 * (exit_queues[dest_node] + rem_exit_q) / exit_cap_hr
-                        ) * 60.0
-
-                    final_arrival_t = base_arrival_t + exit_delay
-                    is_safe = (route.status == RouteStatus.SAFE) and (route.min_margin_min >= 0.0)
-                    zone_vehicle_results[dem.zone_name].append(
-                        (t_slice, final_arrival_t, route.min_margin_min, is_safe)
+                    route = _reconstruct_route(
+                        road_graph=self.road_graph,
+                        origin_node=dem.origin_node_id,
+                        dest_node=d,
+                        t0=t_slice,
+                        parent=dem_parents[dem],
+                        edge_fire_arrivals=edge_fire_arrivals,
+                        status=RouteStatus.SAFE
+                        if d in dem_reached.get(dem, [])
+                        else RouteStatus.BEST_EFFORT,
+                        mode_used=RoutingMode.FASTEST_SAFE,
+                        dynamic_edge_traversal_times=dyn_edge_times,
                     )
 
-                    # Build cohort trajectory intervals
+                    exit_delay = exit_delays.get(d, 0.0)
+                    final_arrival_t = route.arrival_time_min + exit_delay
+                    is_safe = (route.status == RouteStatus.SAFE) and (route.min_margin_min >= 0.0)
+
+                    zone_vehicle_results[dem.zone_name].append(
+                        (t_slice, final_arrival_t, route.min_margin_min, is_safe, int(n_d))
+                    )
+
+                    dest_name = dest_node_to_name.get(d, str(d))
+                    self.last_vehicles_per_exit_over_time[dest_name][t_slice] += int(n_d)
+                    self.last_vehicles_per_exit_by_id[d][t_slice] += int(n_d)
+
                     intervals = []
                     for re in route.edges:
                         cand_idx = edge_lookup.get((re.u, re.v, re.key))
                         if cand_idx is not None:
-                            edge_slice_flows[cand_idx] += cnt
+                            edge_slice_flows[cand_idx] += n_d
                             intervals.append((cand_idx, re.entry_time_min, re.exit_time_min))
 
+                    exit_slice_flows[d] += n_d
                     cohort_trajectories.append(
                         {
                             "zone_name": dem.zone_name,
-                            "num_vehicles": cnt,
+                            "destination_id": d,
+                            "num_vehicles": int(n_d),
                             "intervals": intervals,
                         }
                     )
 
-        # 3. Compute Entrapment Metrics from recorded cohort trajectories
+            # Physical Queue Updating at End of Time Slice
+            for e_idx in range(num_edges):
+                cap_e = self.congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
+                slice_cap = cap_e * (time_slice_min / 60.0)
+                old_q = edge_queues[e_idx]
+                rem_q = max(0.0, old_q + edge_slice_flows[e_idx] - slice_cap)
+                edge_queues[e_idx] = rem_q
+                avg_q = 0.5 * (old_q + rem_q)
+                q_del = (avg_q / cap_e) * 60.0 if cap_e > 0 else 0.0
+                edge_total_delays[e_idx] += q_del
+                if rem_q > 0:
+                    self.last_edge_queues_over_time[e_idx][t_slice] = rem_q
+
+            for d in destination_node_ids:
+                cap_d = effective_exit_capacities[d]
+                slice_exit_cap = cap_d * (time_slice_min / 60.0)
+                old_exit_q = exit_queues.get(d, 0.0)
+                rem_exit_q = max(0.0, old_exit_q + exit_slice_flows.get(d, 0.0) - slice_exit_cap)
+                exit_queues[d] = rem_exit_q
+
+        # Save persistent run state
+        self.last_edge_queues = edge_queues
+        self.last_cohort_trajectories = cohort_trajectories
+        self.last_edge_total_delays = edge_total_delays
+
+        # Compute Entrapment Metrics from recorded cohort trajectories
         entrapment = self._compute_entrapment_metrics(
             cohort_trajectories=cohort_trajectories,
             edge_fire_arrivals=edge_fire_arrivals,
             danger_buffer_minutes=danger_buffer_minutes,
         )
 
-        # 4. Compile clearance summary per zone
+        # Compile clearance summary per zone
         summaries: dict[str, ZoneClearanceSummary] = {}
         for z_name, zone in self.demand_model.zones.items():
             results = zone_vehicle_results.get(z_name, [])
             total_v = zone.num_vehicles
-            evac_v = len(results)
+            evac_v = sum(r[4] for r in results) if results else 0
 
-            if results:
+            if results and evac_v > 0:
                 last_arrival = max(r[1] for r in results)
                 min_marg = min(r[2] for r in results)
-                unsafe_cnt = sum(1 for r in results if not r[3])
-                pct_unsafe = (unsafe_cnt / evac_v) * 100.0 if evac_v > 0 else 100.0
+                unsafe_cnt = sum(r[4] for r in results if not r[3])
+                pct_unsafe = (unsafe_cnt / evac_v) * 100.0
             else:
                 last_arrival = float("inf")
                 min_marg = -float("inf")
@@ -379,6 +665,57 @@ class TimeSlicedAssignmentEngine:
             )
 
         return summaries, entrapment
+
+    def print_vehicles_per_exit_over_time(self) -> None:
+        """Print table of vehicle departures per exit corridor across time slices."""
+        print("\n=== VEHICLES PER EXIT CORRIDOR OVER TIME (Baseline Assignment) ===")
+        all_exits = sorted(self.last_vehicles_per_exit_over_time.keys())
+        all_times = sorted(
+            {t for d in all_exits for t in self.last_vehicles_per_exit_over_time[d].keys()}
+        )
+        if not all_times:
+            print("No vehicles assigned to any exit.")
+            return
+
+        header = f"{'Time (min)':<12}" + "".join(f"{d:>18}" for d in all_exits) + f"{'Total':>14}"
+        print(header)
+        print("-" * len(header))
+        cum_by_exit: dict[str, int] = defaultdict(int)
+        for t in all_times:
+            row_vals = [self.last_vehicles_per_exit_over_time[d].get(t, 0) for d in all_exits]
+            row_total = sum(row_vals)
+            for d, v in zip(all_exits, row_vals, strict=True):
+                cum_by_exit[d] += v
+            print(f"{t:<12.1f}" + "".join(f"{v:>18}" for v in row_vals) + f"{row_total:>14}")
+
+        print("-" * len(header))
+        total_evac = sum(cum_by_exit.values())
+        print(
+            f"{'CUMULATIVE':<12}"
+            + "".join(f"{cum_by_exit[d]:>18}" for d in all_exits)
+            + f"{total_evac:>14}"
+        )
+
+    def print_edge_queue_lengths(self, top_n: int = 15) -> None:
+        """Print table of maximum and persistent edge queue lengths and bottleneck locations."""
+        print(f"\n=== TOP {top_n} EDGE QUEUE BOTTLENECKS (Max Vehicles Queued) ===")
+        max_queues: list[tuple[int, float, str, str]] = []
+        for e_idx, time_dict in self.last_edge_queues_over_time.items():
+            if time_dict:
+                max_q = max(time_dict.values())
+                ed = self.road_graph.edges[e_idx]
+                max_queues.append((e_idx, max_q, ed.name or "Unnamed", ed.highway))
+
+        max_queues.sort(key=lambda x: -x[1])
+        if not max_queues:
+            print("No internal edge queues accumulated (all links within slice capacity).")
+            return
+
+        header = f"{'Edge Index':<12} {'Max Queue (veh)':<18} {'Highway Type':<16} {'Road Name'}"
+        print(header)
+        print("-" * len(header))
+        for e_idx, max_q, name, hw in max_queues[:top_n]:
+            print(f"{e_idx:<12} {max_q:<18.1f} {hw:<16} {name}")
 
     def _compute_entrapment_metrics(
         self,

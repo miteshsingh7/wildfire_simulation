@@ -1,66 +1,61 @@
-# Configuration for Wildland Evacuation Demand and Traffic Assignment (Phase 4c)
+# Configuration for Wildland Evacuation Demand and Traffic Assignment (Phase 4d)
 #
-# Citations for Population & Evacuation Parameters:
-# 1. US Census Bureau, 2010 Decennial Census, Summary File 1 (SF1), Table P1 ("Total Population")
-#    for Town of Paradise (26,218 total: North=6,412, Central=7,134, East=5,828, South=6,844),
-#    Magalia CDP (11,310), and Concow CDP (710). Reconciles exactly to 26,218.
-# 2. NIST TN 2252 (2023) Table 4-1 / 5-2 quote: "Evacuation orders were initiated for Paradise Zones
-#    at 07:46 PST, expanding county-wide through 08:20 PST."
-# 3. FHWA-HOP-08-015 Table 3-2 quote: "Average vehicle occupancy for evacuation planning is
-#    empirically estimated between 1.5 and 1.7 persons per vehicle."
-# 4. HCM 6th Edition (2016) generalized planning tables: unverified assumption for per-lane link capacities.
-# 5. Destination Safety Buffer: 6.0 km is an unverified assumption (exceeds NIST TN 2135 Table 4-8
-#    maximum documented spotting distance of ~4.8 km / 3.0 mi across Feather River Canyon).
+# Citations for Parameters:
+# 1. Roadway Characteristics: NIST TN 2252 sup Appendix B (Table B-1, pages 114-120).
+# 2. Highway Capacity Bounds: Caltrans PeMS CA-99 sensor network, NIST TN 2252 sup Appendix G.
+# 3. Background Commute Traffic: NIST TN 2252 sup Table A-2, row 07:57, Source ID TD-086 (p. 19).
+# 4. Zone Boundaries: Butte County GIS Evacuation Plan Maps, NIST TN 2252 sup Appendix C (p. 124-125).
+# 5. Evacuation Timeline: NIST TN 2252 Table 11 (p. 94) and Table 4-1 / Table D-1.
+# 6. Reverse-911 Failure Rates: NIST TN 2252 sup Table D-2 (42% to 47% failure rate).
+# 7. Safety Radius: >= 7.0 km based on NIST TN 2135 Section 4.5 (pages 158 and 182).
+# 8. Census Demographics: US Census Bureau 2010 Decennial Census block join from tl_2010_06007_tabblock10.
 
 scenario:
   name: "Camp_Fire_2018_Evacuation_Scenario"
-  # Unified master ignition clock across fire simulation, demand, and router
+  # Master ignition clock
   t0_ignition_utc: "2018-11-08T14:33:00Z"
   event_ignition_pst: "2018-11-08T06:33:00-08:00"
   time_slice_minutes: 5.0
   total_horizon_minutes: 720.0
-  # Conservative planning assumption: exceeds NIST TN 2135 Table 4-8 max spotting (~4.8 km)
-  destination_safety_buffer_km: 6.0
+  # Default safety radius >= 7.0 km (NIST TN 2135 Section 4.5, p. 158 & 182)
+  destination_safety_buffer_km: 7.0
 
 occupancy:
-  # FHWA-HOP-08-015 Table 3-2: 1.5 - 1.7 range -> 1.6 persons/veh assumption
+  # FHWA-HOP-08-015 Table 3-2 planning assumption
   persons_per_vehicle: 1.6
   status: "assumption"
 
-# Capacity scaling and inbound traffic sensitivity
-capacity_sensitivity:
-  default_capacity_scale: 1.0
-  evaluated_scales: [1.0, 0.7, 0.5]
-  default_inbound_traffic_veh_per_hr: 0.0
-  evaluated_inbound_traffic_veh_per_hr: [0.0, 200.0]
+# Background commute traffic reducing merge capacity at domain boundary exits
+# NIST TN 2252 sup Table A-2 row 07:57 (Source TD-086): Bumper to bumper traffic on CA-99 in Chico
+background_commute_traffic:
+  chico_ca99_commute_veh_per_hr: 500.0
 
-# Planning Assumptions for Link Capacities (veh/hr/lane, HCM 6th Edition generalized planning tables)
-capacities_veh_per_hr_per_lane:
-  status: "planning_assumption"
-  motorway: 2000
-  motorway_link: 1400
-  trunk: 2000
-  trunk_link: 1400
-  primary: 1500
-  primary_link: 1000
-  secondary: 1200
-  secondary_link: 800
-  tertiary: 900
-  tertiary_link: 600
-  residential: 600
-  unclassified: 600
-  service: 300
-  fallback: 600
-
-# Boundary Exit Finite Outflow Capacities (veh/hr across all discharge lanes at domain perimeter)
+# Caltrans PeMS CA-99 Empirical Capacity Bounds (NIST TN 2252 sup Appendix G, Figs. G-1 to G-4)
 boundary_exit_outflow_capacities:
-  skyway_south_exit: 2200.0   # Skyway westbound / southbound to Chico
-  clark_south_exit: 1400.0    # Clark Road (CA-191) southbound to Durham/Oroville
-  pentz_south_exit: 1000.0    # Pentz Road southbound to CA-70
-  highway_70_south_exit: 1800.0  # CA-70 southbound towards Oroville
+  skyway_south_exit: 1600.0   # PeMS Skyway on-ramp / CA-99 mainline merge peak capacity (Fig. G-3)
+  clark_south_exit: 1200.0    # PeMS CA-191 corridor capacity prior to 08:45 emergency closure (p. G-1)
+  pentz_south_exit: 1000.0    # PeMS CA-70 connector capacity prior to 07:45 emergency closure (p. G-1)
+  highway_70_south_exit: 1400.0
   fallback_exit: 1000.0
 
-# Default number of lanes per direction when missing in OSM
+# Roadway characteristics by highway classification (NIST TN 2252 sup Table B-1, p. 114-120)
+capacities_veh_per_hr_per_lane:
+  motorway: 1800
+  motorway_link: 1200
+  trunk: 1800
+  trunk_link: 1200
+  primary: 1400
+  primary_link: 900
+  secondary: 1100
+  secondary_link: 750
+  tertiary: 800
+  tertiary_link: 500
+  residential: 500
+  unclassified: 500
+  service: 250
+  fallback: 500
+
+# Default number of lanes per direction (NIST TN 2252 sup Table B-1)
 default_lanes_per_direction:
   trunk: 2
   primary: 1
@@ -76,58 +71,192 @@ bpr_parameters:
   alpha: 0.15
   beta: 4.0
 
-# Documented Census Population & Sub-Zone Parameters (Reconciles exactly to 26,218)
+# Capacity scaling and sensitivity parameters
+capacity_sensitivity:
+  default_capacity_scale: 1.0
+  evaluated_scales: [1.0, 0.7, 0.5]
+  default_inbound_traffic_veh_per_hr: 0.0
+  evaluated_inbound_traffic_veh_per_hr: [0.0, 200.0]
+
+# Multi-destination logit choice parameter (dispersion parameter theta)
+exit_choice:
+  theta: 0.15  # Sensitivity to path cost differences (minutes)
+
+# Evacuation behavior parameters from NIST TN 2252 sup Appendix A & Appendix D
+behavior:
+  self_evacuation_fraction: 0.15      # 15% self-evacuate before official mandatory order (Appendix A)
+  self_evac_lead_time_min: 30.0       # Self-evacuees start 30 min before official order
+  reverse_911_failure_rate: 0.45      # 45% fail to receive CodeRED notification (Table D-2)
+  notification_delay_unreached_min: 20.0 # Additional delay for residents not reached by reverse-911
+
+# Official Butte County Evacuation Zones (NIST TN 2252 sup Appendix C; Table 11 p. 94; Census 2010 block join)
 zones:
-  Paradise_North:
-    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 18 block groups: upper Skyway/Clark)"
-    population: 6412
-    centroid_utm: [620099.0, 4404502.5]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
-    notification_elapsed_min: 73.0
+  Zone_1:
+    source_citation: "NIST TN 2252 Table 11 row Zone 1 (p. 94); Appendix C map (p. 124)"
+    population: 1121
+    centroid_utm: [619633.8, 4404652.2]
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min from 06:33 PST)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
-  Paradise_Central:
-    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 19 block groups: Town Hall/Pearson)"
-    population: 7134
-    centroid_utm: [618047.8, 4401983.8]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
-    notification_elapsed_min: 73.0
+  Zone_2:
+    source_citation: "NIST TN 2252 Table 11 row Zone 2 (p. 94); Appendix C map (p. 124)"
+    population: 3411
+    centroid_utm: [620904.3, 4404593.0]
+    order_clock_pst: "08:01:00"
+    notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
+    warning_elapsed_min: 82.0          # 07:55 PST (T+82 min)
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
-  Paradise_East:
-    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 20 block groups: Pentz/Sawmill)"
-    population: 5828
-    centroid_utm: [620400.0, 4399800.0]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:46 PST, T+73 min)"
-    notification_elapsed_min: 73.0
+  Zone_3:
+    source_citation: "NIST TN 2252 Table 11 row Zone 3 (p. 94); Appendix C map (p. 124)"
+    population: 708
+    centroid_utm: [622024.3, 4405207.5]
+    order_clock_pst: "07:46:00"
+    notification_elapsed_min: 73.0     # 07:46 PST (T+73 min)
+    warning_elapsed_min: 59.0          # 07:32 PST (T+59 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 60.0
+
+  Zone_4:
+    source_citation: "NIST TN 2252 Table 11 row Zone 4 (p. 94); Appendix C map (p. 124)"
+    population: 1350
+    centroid_utm: [616588.1, 4402192.4]
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
 
-  Paradise_South:
-    census_source: "US Census 2010 SF1 Table P1 (Town of Paradise, Tract 21 block groups: Lower Clark/Neal)"
-    population: 6844
-    centroid_utm: [616800.0, 4397500.0]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:53 PST, T+80 min)"
-    notification_elapsed_min: 80.0
+  Zone_5:
+    source_citation: "NIST TN 2252 Table 11 row Zone 5 (p. 94); Appendix C map (p. 124)"
+    population: 4396
+    centroid_utm: [618530.2, 4403130.0]
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
     departure_curve_shape: "sigmoid"
     departure_duration_min: 90.0
+
+  Zone_6:
+    source_citation: "NIST TN 2252 Table 11 row Zone 6 (p. 94); Appendix C map (p. 124)"
+    population: 1993
+    centroid_utm: [618697.4, 4401704.7]
+    order_clock_pst: "08:01:00"
+    notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
+    warning_elapsed_min: 88.0
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_7:
+    source_citation: "NIST TN 2252 Table 11 row Zone 7 (p. 94); Appendix C map (p. 124)"
+    population: 3491
+    centroid_utm: [620795.9, 4402138.5]
+    order_clock_pst: "08:01:00"
+    notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
+    warning_elapsed_min: 82.0          # 07:55 PST (T+82 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_8:
+    source_citation: "NIST TN 2252 Table 11 row Zone 8 (p. 94); Appendix C map (p. 124)"
+    population: 1593
+    centroid_utm: [622185.1, 4402693.3]
+    order_clock_pst: "07:46:00"
+    notification_elapsed_min: 73.0     # 07:46 PST (T+73 min)
+    warning_elapsed_min: 59.0          # 07:32 PST (T+59 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 60.0
+
+  Zone_9:
+    source_citation: "NIST TN 2252 Table 11 row Zone 9 (p. 94); Appendix C map (p. 124)"
+    population: 1073
+    centroid_utm: [616374.2, 4400381.1]
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_10:
+    source_citation: "NIST TN 2252 Table 11 row Zone 10 (p. 94); Appendix C map (p. 124)"
+    population: 876
+    centroid_utm: [616172.5, 4399383.7]
+    order_clock_pst: "08:03:00"        # ECC town-wide mandatory declaration (p. 94)
+    notification_elapsed_min: 90.0     # 08:03 PST (T+90 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_11:
+    source_citation: "NIST TN 2252 Table 11 row Zone 11 (p. 94); Appendix C map (p. 124)"
+    population: 2352
+    centroid_utm: [618105.0, 4400194.0]
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_12:
+    source_citation: "NIST TN 2252 Table 11 row Zone 12 (p. 94); Appendix C map (p. 124)"
+    population: 549
+    centroid_utm: [619652.9, 4400235.0]
+    order_clock_pst: "08:03:00"        # ECC town-wide mandatory declaration (p. 94)
+    notification_elapsed_min: 90.0     # 08:03 PST (T+90 min)
+    warning_elapsed_min: 88.0          # 08:01 PST (T+88 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_13:
+    source_citation: "NIST TN 2252 Table 11 row Zone 13 (p. 94); Appendix C map (p. 124)"
+    population: 1814
+    centroid_utm: [620693.9, 4400010.1]
+    order_clock_pst: "08:01:00"
+    notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
+    warning_elapsed_min: 82.0          # 07:55 PST (T+82 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 90.0
+
+  Zone_14:
+    source_citation: "NIST TN 2252 Table 11 row Zone 14 (p. 94); Appendix C map (p. 124)"
+    population: 1491
+    centroid_utm: [622345.3, 4399788.2]
+    order_clock_pst: "07:46:00"
+    notification_elapsed_min: 73.0     # 07:46 PST (T+73 min)
+    warning_elapsed_min: 59.0          # 07:32 PST (T+59 min)
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 60.0
 
   Magalia:
-    census_source: "US Census 2010 SF1 Table P1 (Magalia CDP)"
+    source_citation: "NIST TN 2252 Table 11 rows Old Magalia, Pines, Firhaven (p. 94); US Census 2010 SF1"
     population: 11310
     centroid_utm: [621690.1, 4407869.3]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~08:20 PST, T+107 min)"
-    notification_elapsed_min: 107.0
+    order_clock_pst: "08:49:00"
+    notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
+    warning_elapsed_min: 136.0
     departure_curve_shape: "sigmoid"
     departure_duration_min: 120.0
 
   Concow:
-    census_source: "US Census 2010 SF1 Table P1 (Concow CDP)"
+    source_citation: "NIST TN 2252 Table 11 row Concow (p. 94); US Census 2010 SF1"
     population: 710
     centroid_utm: [627156.9, 4399353.8]
-    notification_source: "NIST TN 2252 Table 4-1 (Evacuation order issued ~07:30 PST, T+57 min)"
-    notification_elapsed_min: 57.0
+    order_clock_pst: "07:37:00"
+    notification_elapsed_min: 64.0     # 07:37 PST (T+64 min)
+    warning_elapsed_min: 49.0          # 07:22 PST (T+49 min)
     departure_curve_shape: "sigmoid"
     departure_duration_min: 60.0
+
+  Pulga:
+    source_citation: "NIST TN 2252 Table 11 row Pulga (p. 94); NIST TN 2135"
+    population: 25
+    centroid_utm: [633391.0, 4407338.0]
+    order_clock_pst: "06:55:00"
+    notification_elapsed_min: 22.0     # 06:55 PST (T+22 min)
+    warning_elapsed_min: 22.0
+    departure_curve_shape: "sigmoid"
+    departure_duration_min: 30.0

@@ -169,12 +169,52 @@ class EvacuationDemandModel:
         return sum(z.population for z in self.zones.values())
 
     def get_paradise_population(self) -> int:
-        """Return total population across all Paradise sub-zones, reconciling to Census total."""
-        return sum(z.population for name, z in self.zones.items() if "Paradise" in name)
+        """Return total population across all Paradise zones, reconciling to Census total."""
+        return sum(
+            z.population
+            for name, z in self.zones.items()
+            if name.startswith("Zone_") or "Paradise" in name
+        )
 
     def get_total_vehicles(self) -> int:
         """Return total regional vehicle fleet size across all zones."""
         return sum(z.num_vehicles for z in self.zones.values())
+
+    def set_ignition_clock(self, ignition_time_utc: str) -> None:
+        """Update master ignition clock from ArrivalField and shift departure curves.
+
+        CONTRACT: Shifting ArrivalField.ignition_time shifts all zone departures by the exact offset.
+        """
+        import datetime
+
+        old_dt = datetime.datetime.fromisoformat(self.t0_ignition_utc.replace("Z", "+00:00"))
+        new_dt = datetime.datetime.fromisoformat(ignition_time_utc.replace("Z", "+00:00"))
+        shift_min = (old_dt - new_dt).total_seconds() / 60.0
+
+        self.t0_ignition_utc = ignition_time_utc
+        # Shift all zone notification times and recalculate schedules
+        new_zones = {}
+        for name, zone in self.zones.items():
+            new_notif = max(0.0, zone.notification_elapsed_min + shift_min)
+            new_z = EvacuationZone(
+                name=zone.name,
+                census_source=zone.census_source,
+                population=zone.population,
+                num_vehicles=zone.num_vehicles,
+                centroid_utm=zone.centroid_utm,
+                notification_elapsed_min=new_notif,
+                departure_duration_min=zone.departure_duration_min,
+                origin_node_id=zone.origin_node_id,
+            )
+            new_zones[name] = new_z
+            self.departure_schedules[name] = calculate_departure_schedule(
+                total_vehicles=zone.num_vehicles,
+                notification_min=new_notif,
+                duration_min=zone.departure_duration_min,
+                time_slice_min=self.time_slice_min,
+                horizon_min=self.horizon_min,
+            )
+        self.zones = new_zones
 
     def get_slices_demand(self) -> list[TimeSliceDemand]:
         """Return flattened list of all time-slice demands sorted chronologically."""

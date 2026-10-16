@@ -1,8 +1,9 @@
 """Generate coverage plot of road graph extent vs Camp Fire domain bounding box."""
 
 from pathlib import Path
-import matplotlib.pyplot as plt
+
 import geopandas as gpd
+import matplotlib.pyplot as plt
 from shapely.geometry import box
 
 # Domain BBox from configs/phase0.yaml

@@ -12,9 +12,9 @@ Identifies the dominant bottleneck parameter and compares against NETTRA / BCAG 
 """
 
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import yaml
 
 from wf052.routing.congestion import CongestionModel, TimeSlicedAssignmentEngine
 from wf052.routing.demand import EvacuationDemandModel
@@ -28,7 +28,8 @@ def run_single_scenario(
     inbound_traffic: float = 0.0,
     exit_capacities: dict[str, float] | None = None,
     skyway_contraflow: bool = False,
-) -> tuple[float, dict[str, float]]:
+    is_baseline: bool = False,
+) -> tuple[float, dict[str, float], TimeSlicedAssignmentEngine]:
     demand_model = EvacuationDemandModel(
         config_path="configs/evacuation_demand.yaml", road_graph=road_graph
     )
@@ -44,10 +45,8 @@ def run_single_scenario(
         congestion_model.exit_outflow_capacities.update(exit_capacities)
 
     if skyway_contraflow:
-        # Find Skyway edges and activate contraflow (doubling outbound capacity)
         skyway_edges = [
-            i for i, e in enumerate(road_graph.edges)
-            if "skyway" in e.name.lower()
+            i for i, e in enumerate(road_graph.edges) if "skyway" in str(e.name).lower()
         ]
         congestion_model.apply_contraflow(skyway_edges, capacity_multiplier=2.0)
 
@@ -69,22 +68,27 @@ def run_single_scenario(
         apply_exit_capacities=True,
     )
 
-    paradise_zones = ["Paradise_North", "Paradise_Central", "Paradise_East", "Paradise_South"]
+    paradise_zones = [z for z in summaries.keys() if z.startswith("Zone_") or "Paradise" in z]
     paradise_clearance_min = max(summaries[z].clearance_time_min for z in paradise_zones)
     paradise_clearance_hrs = paradise_clearance_min / 60.0
 
     zone_hours = {z: summaries[z].clearance_time_hours for z in paradise_zones}
-    return paradise_clearance_hrs, zone_hours
+
+    if is_baseline:
+        engine.print_vehicles_per_exit_over_time()
+        engine.print_edge_queue_lengths(top_n=12)
+
+    return paradise_clearance_hrs, zone_hours, engine
 
 
 def main():
-    print("Loading RoadGraph for Camp Fire domain...")
+    print("Loading RoadGraph for Camp Fire domain (14,691 edges)...")
     road_graph = load_camp_fire_road_graph(full_detail=True)
     print(f"Loaded graph: {len(road_graph.nodes)} nodes, {len(road_graph.edges)} edges.")
 
     # 1. Baseline scenario
-    base_hrs, base_zones = run_single_scenario(road_graph)
-    print(f"\nBaseline Clearance (scale=1.0, inbound=0, nominal exits, contraflow=OFF): {base_hrs:.2f} h")
+    base_hrs, base_zones, base_engine = run_single_scenario(road_graph, is_baseline=True)
+    print(f"\nBaseline Paradise Clearance: {base_hrs:.2f} h ({base_hrs * 60.0:.1f} min)")
 
     scenarios = [
         ("Baseline (Nominal)", 1.0, 0.0, None, False),
@@ -94,35 +98,66 @@ def main():
         # Inbound traffic
         ("Inbound Traffic = 200 veh/hr", 1.0, 200.0, None, False),
         # Exit capacities (-30% individual reductions)
-        ("Skyway Exit Cap -30% (1,540 veh/hr)", 1.0, 0.0, {"skyway_south_exit": 1540.0, "fallback_exit": 700.0}, False),
-        ("Clark Exit Cap -30% (980 veh/hr)", 1.0, 0.0, {"clark_south_exit": 980.0}, False),
+        (
+            "Skyway Exit Cap -30% (1,120 veh/hr)",
+            1.0,
+            0.0,
+            {"skyway_south_exit": 1120.0, "fallback_exit": 700.0},
+            False,
+        ),
+        ("Clark Exit Cap -30% (840 veh/hr)", 1.0, 0.0, {"clark_south_exit": 840.0}, False),
         ("Pentz Exit Cap -30% (700 veh/hr)", 1.0, 0.0, {"pentz_south_exit": 700.0}, False),
-        ("All Exits -30% Outflow", 1.0, 0.0, {"skyway_south_exit": 1540.0, "clark_south_exit": 980.0, "pentz_south_exit": 700.0, "fallback_exit": 700.0}, False),
+        (
+            "All Exits -30% Outflow",
+            1.0,
+            0.0,
+            {
+                "skyway_south_exit": 1120.0,
+                "clark_south_exit": 840.0,
+                "pentz_south_exit": 700.0,
+                "fallback_exit": 700.0,
+            },
+            False,
+        ),
         # Contraflow
         ("Skyway Contraflow = ON (2x capacity)", 1.0, 0.0, None, True),
         # Extreme Congestion Compound
-        ("Compound Worst-Case (Scale 0.5 + Inbound 200 + Exits -30%)", 0.5, 200.0, {"skyway_south_exit": 1540.0, "clark_south_exit": 980.0, "pentz_south_exit": 700.0, "fallback_exit": 700.0}, False),
+        (
+            "Compound Worst-Case (Scale 0.5 + Inbound 200 + Exits -30%)",
+            0.5,
+            200.0,
+            {
+                "skyway_south_exit": 1120.0,
+                "clark_south_exit": 840.0,
+                "pentz_south_exit": 700.0,
+                "fallback_exit": 700.0,
+            },
+            False,
+        ),
     ]
 
     results = []
     for label, cap_scale, inbound, exits, contra in scenarios:
-        hrs, z_hrs = run_single_scenario(
+        hrs, z_hrs, _ = run_single_scenario(
             road_graph,
             capacity_scale=cap_scale,
             inbound_traffic=inbound,
             exit_capacities=exits,
             skyway_contraflow=contra,
+            is_baseline=False,
         )
         delta_hrs = hrs - base_hrs
-        results.append({
-            "Scenario / Parameter": label,
-            "Clearance (h)": round(hrs, 2),
-            "Delta vs Baseline (h)": round(delta_hrs, 2),
-            "Paradise North (h)": round(z_hrs["Paradise_North"], 2),
-            "Paradise Central (h)": round(z_hrs["Paradise_Central"], 2),
-            "Paradise East (h)": round(z_hrs["Paradise_East"], 2),
-            "Paradise South (h)": round(z_hrs["Paradise_South"], 2),
-        })
+        z_vals = list(z_hrs.values())
+        results.append(
+            {
+                "Scenario / Parameter": label,
+                "Clearance (h)": round(hrs, 2),
+                "Delta vs Baseline (h)": round(delta_hrs, 2),
+                "Mean Zone (h)": round(float(np.mean(z_vals)), 2),
+                "Min Zone (h)": round(float(np.min(z_vals)), 2),
+                "Max Zone (h)": round(float(np.max(z_vals)), 2),
+            }
+        )
 
     df = pd.DataFrame(results)
     out_csv = Path("reports/paradise_clearance_tornado_sensitivity.csv")

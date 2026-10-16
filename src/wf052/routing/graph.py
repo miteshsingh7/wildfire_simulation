@@ -55,6 +55,21 @@ CAMP_FIRE_LANDMARKS_UTM: dict[str, tuple[float, float]] = {
     "Concow": (627156.9, 4399353.8),  # Concow / Camelot
     "Stirling_City": (625821.5, 4418516.6),  # Stirling City
     "Pulga": (633391.0, 4407338.0),  # Ignition origin
+    # Official Butte County Evacuation Zones (NIST TN 2252 sup Appendix C & Census 2010)
+    "Zone_1": (619633.8, 4404652.2),
+    "Zone_2": (620904.3, 4404593.0),
+    "Zone_3": (622024.3, 4405207.5),
+    "Zone_4": (616588.1, 4402192.4),
+    "Zone_5": (618530.2, 4403130.0),
+    "Zone_6": (618697.4, 4401704.7),
+    "Zone_7": (620795.9, 4402138.5),
+    "Zone_8": (622185.1, 4402693.3),
+    "Zone_9": (616374.2, 4400381.1),
+    "Zone_10": (616172.5, 4399383.7),
+    "Zone_11": (618105.0, 4400194.0),
+    "Zone_12": (619652.9, 4400235.0),
+    "Zone_13": (620693.9, 4400010.1),
+    "Zone_14": (622345.3, 4399788.2),
 }
 
 
@@ -295,6 +310,14 @@ class RoadGraph:
                         node_ids[np.argmax(node_coords[:, 1])]
                     )
 
+        # Explicitly map the three canonical Town of Paradise evacuation corridors (NIST TN 2252 Table B-1)
+        if 2611113946 in self.nodes:
+            self.boundary_destinations["Skyway_West"] = 2611113946
+        if 86429619 in self.nodes:
+            self.boundary_destinations["Clark_South"] = 86429619
+        if 86469871 in self.nodes:
+            self.boundary_destinations["Pentz_South"] = 86469871
+
     def compute_edge_fire_arrivals(self, arrival_field: xr.Dataset) -> np.ndarray:
         """Compute the minimum fire arrival time q10 for each edge in the graph.
 
@@ -318,10 +341,12 @@ class RoadGraph:
     def check_destination_safety(
         self,
         arrival_field: xr.Dataset,
-        safety_buffer_km: float = 6.0,
+        safety_buffer_km: float = 7.0,
         horizon_minutes: float = 720.0,
     ) -> tuple[set[int], dict[int, float]]:
         """Check all boundary destination exits against fire encroachment within X km.
+
+        Default safety radius >= 7.0 km based on NIST TN 2135 Section 4.5 (pages 158 and 182).
 
         Returns:
             (safe_destination_node_ids, dict of unsafe_destination_node_id -> min_arrival_time_within_buffer)

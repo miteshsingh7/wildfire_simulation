@@ -10,21 +10,22 @@ Explicitly benchmarks the full time-sliced assignment pipeline in contrast
 to prior benchmarks that only measured point-to-point Dijkstra replanning.
 """
 
-from pathlib import Path
 import time
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 from wf052.routing.congestion import CongestionModel, TimeSlicedAssignmentEngine
 from wf052.routing.demand import EvacuationDemandModel
-from wf052.routing.graph import RoadGraph, load_camp_fire_road_graph
+from wf052.routing.graph import load_camp_fire_road_graph
 from wf052.routing.router import TimeDependentRouter
 from wf052.routing.synthetic_fire import create_wind_ellipse_arrival_field
 from wf052.routing.validator import IndependentRouteValidator
 
 
 def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
-    print(f"Loading full-detail Camp Fire road graph (14,691 edges)...")
+    print("Loading full-detail Camp Fire road graph (14,691 edges)...")
     road_graph = load_camp_fire_road_graph(full_detail=True)
     assert road_graph.grid_x is not None and road_graph.grid_y is not None
     x = road_graph.grid_x
@@ -81,38 +82,49 @@ def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
         edge_arrivals = road_graph.compute_edge_fire_arrivals(arr_field)
         t1_1 = time.perf_counter()
 
-        # Stage 2: Congested time-sliced re-assignment
+        # Stage 2: Congested time-sliced re-assignment from now forward (t >= t_now = 60.0)
         t2_0 = time.perf_counter()
         summaries, entrapment = engine.run_assignment(
             edge_fire_arrivals=edge_arrivals,
             destination_node_ids=destinations,
             apply_exit_capacities=True,
+            t_now=60.0,
         )
         t2_1 = time.perf_counter()
 
         # Stage 3: Independent route validation on selected routes
         t3_0 = time.perf_counter()
-        for z_name, z_obj in demand_model.zones.items():
+        for _z_name, z_obj in demand_model.zones.items():
             route = router.find_route(
                 origin_node=z_obj.origin_node_id,
                 destination_nodes=destinations,
-                t0=z_obj.notification_elapsed_min,
+                t0=max(60.0, z_obj.notification_elapsed_min),
                 edge_fire_arrivals=edge_arrivals,
             )
             if route is not None and route.edges:
                 validator.validate(route, arr_field, road_graph)
         t3_1 = time.perf_counter()
 
-        # Stage 4: Standalone Entrapment Metrics computation
+        # Stage 4: Standalone Entrapment Metrics computation operating on REAL cohorts
+        real_cohorts = engine.last_cohort_trajectories
         t4_0 = time.perf_counter()
         _ = engine._compute_entrapment_metrics(
-            cohort_trajectories=[],
+            cohort_trajectories=real_cohorts,
             edge_fire_arrivals=edge_arrivals,
             danger_buffer_minutes=15.0,
         )
         t4_1 = time.perf_counter()
 
         t_run_end = time.perf_counter()
+
+        if i == 0:
+            num_intervals = sum(len(c["intervals"]) for c in real_cohorts)
+            print("\n--- ARRAY SIZES & COHORT DIMENSIONS (Stage 4) ---")
+            print(f"Cohort Count: {len(real_cohorts):,} real cohorts")
+            print(f"Total Cohort Edge Intervals: {num_intervals:,} intervals")
+            print(f"Edge Fire Arrivals Array Size: {len(edge_arrivals):,} edges")
+            print(f"Active Evacuation Zones: {len(demand_model.zones)} zones")
+            print("Re-assignment Horizon: t >= 60.0 min (from 'now' forward)\n")
 
         times_stage1.append(t1_1 - t1_0)
         times_stage2.append(t2_1 - t2_0)
@@ -122,22 +134,24 @@ def benchmark_pipeline(num_runs: int = 25) -> pd.DataFrame:
 
     stages = [
         ("Stage 1: Field Update & Edge Mapping", times_stage1),
-        ("Stage 2: Congested Time-Sliced Re-Assignment", times_stage2),
+        ("Stage 2: Congested Time-Sliced Re-Assignment (t >= t_now)", times_stage2),
         ("Stage 3: Independent Route Validation", times_stage3),
-        ("Stage 4: Cohort Entrapment Metrics", times_stage4),
+        ("Stage 4: Cohort Entrapment Metrics (Real Cohorts)", times_stage4),
         ("Total End-to-End Pipeline", times_total),
     ]
 
     records = []
     for name, data in stages:
         arr_ms = np.array(data) * 1000.0
-        records.append({
-            "Stage": name,
-            "p50 (ms)": round(float(np.percentile(arr_ms, 50)), 2),
-            "p95 (ms)": round(float(np.percentile(arr_ms, 95)), 2),
-            "max (ms)": round(float(np.max(arr_ms)), 2),
-            "mean (ms)": round(float(np.mean(arr_ms)), 2),
-        })
+        records.append(
+            {
+                "Stage": name,
+                "p50 (ms)": round(float(np.percentile(arr_ms, 50)), 2),
+                "p95 (ms)": round(float(np.percentile(arr_ms, 95)), 2),
+                "max (ms)": round(float(np.max(arr_ms)), 2),
+                "mean (ms)": round(float(np.mean(arr_ms)), 2),
+            }
+        )
 
     df = pd.DataFrame(records)
     out_csv = Path("reports/latency_4stage_benchmark.csv")

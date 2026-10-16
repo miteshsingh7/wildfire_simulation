@@ -1,6 +1,6 @@
 Stage,p50 (ms),p95 (ms),max (ms),mean (ms)
-Stage 1: Field Update & Edge Mapping,37.77,57.68,71.4,40.89
-Stage 2: Congested Time-Sliced Re-Assignment,2493.31,4099.71,4569.66,2636.43
-Stage 3: Independent Route Validation,90.82,147.91,151.02,99.36
-Stage 4: Cohort Entrapment Metrics,0.01,0.01,0.01,0.01
-Total End-to-End Pipeline,2625.06,4277.52,4762.16,2776.69
+Stage 1: Field Update & Edge Mapping,37.47,40.4,41.38,37.78
+Stage 2: Congested Time-Sliced Re-Assignment (t >= t_now),10733.51,11491.99,11810.5,10746.38
+Stage 3: Independent Route Validation,209.49,326.15,349.47,224.12
+Stage 4: Cohort Entrapment Metrics (Real Cohorts),51.06,74.11,77.17,54.25
+Total End-to-End Pipeline,11028.43,11936.57,12278.66,11065.98
