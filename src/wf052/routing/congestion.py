@@ -326,6 +326,7 @@ class TimeSlicedAssignmentEngine:
         t_now: float = 0.0,
         theta: float = 0.15,
         msa_iterations: int = 4,
+        apply_spillback_penalty: bool = True,
     ) -> tuple[dict[str, ZoneClearanceSummary], EntrapmentMetrics]:
         """Execute dynamic 5-minute time-sliced traffic assignment across all zones.
 
@@ -460,6 +461,7 @@ class TimeSlicedAssignmentEngine:
                     c_lat = float(closure["lat"])
                     c_lon = float(closure["lon"])
                     c_rad = float(closure.get("radius_m", 600.0))
+                    inbound_only = bool(closure.get("inbound_only", True))
                     if (c_lat, c_lon) not in self._closure_points_utm:
                         import pyproj
 
@@ -473,6 +475,10 @@ class TimeSlicedAssignmentEngine:
                             np.hypot(u_pt[0] - cx, u_pt[1] - cy) <= c_rad
                             or np.hypot(v_pt[0] - cx, v_pt[1] - cy) <= c_rad
                         ):
+                            # Directional check: Inbound (Northbound toward fire: v_pt[1] >= u_pt[1])
+                            # Outbound (Southbound toward Oroville/Marysville: v_pt[1] < u_pt[1]) remains open!
+                            if inbound_only and (v_pt[1] < u_pt[1]):
+                                continue
                             closed_edge_indices.add(e.edge_idx)
 
             # CONGESTED QUEUE-AWARE ASSIGNMENT WITH MSA LOGIT FLOW SPLITTING & RELATIVE GAP CONVERGENCE
@@ -495,7 +501,7 @@ class TimeSlicedAssignmentEngine:
                     q_e = edge_queues[e_idx] + 0.5 * tentative_edge_flows[e_idx]
                     storage_e = self.congestion_model.edge_capacities[e_idx].storage_veh
                     q_delay = (q_e / cap_e) * 60.0 if cap_e > 0 else 0.0
-                    if q_e > storage_e:
+                    if apply_spillback_penalty and q_e > storage_e:
                         # Physical spillback impedance: links exceeding vehicle storage penalize ingress
                         spill_penalty = ((q_e - storage_e) / max(10.0, cap_e)) * 60.0
                         q_delay += spill_penalty

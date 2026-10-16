@@ -759,3 +759,55 @@ def test_phase4e_time_dependent_roadblock_closure(camp_fire_graph: RoadGraph) ->
     cm = CongestionModel(road_graph=camp_fire_graph)
     assert len(cm.roadway_closures) >= 1
     assert any("70" in c["name"] and "Pentz" in c["name"] for c in cm.roadway_closures)
+
+
+def test_phase4f_vehicle_conservation_exact_in_equals_out(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4f Task 2: Verify vehicles in == vehicles out and eliminate 150-vehicle gap."""
+    dm = EvacuationDemandModel(road_graph=camp_fire_graph)
+    total_zone_veh = dm.get_total_vehicles()
+    total_slices_veh = sum(d.vehicle_count for d in dm.get_slices_demand())
+    total_block_veh = sum(b.num_vehicles for b in dm.block_demands)
+    pulga_veh = dm.zones.get("Pulga").num_vehicles if "Pulga" in dm.zones else 0
+
+    assert total_zone_veh == total_slices_veh
+    assert total_block_veh + pulga_veh == total_zone_veh
+
+    # Quick assignment with 2 slices to verify in == out
+    cm = CongestionModel(road_graph=camp_fire_graph, use_point_queue=True)
+    router = TimeDependentRouter(road_graph=camp_fire_graph)
+    engine = TimeSlicedAssignmentEngine(
+        road_graph=camp_fire_graph, demand_model=dm, congestion_model=cm, router=router
+    )
+    arrivals = np.full(len(camp_fire_graph.edges), np.inf, dtype=np.float64)
+    dests = set(camp_fire_graph.boundary_destinations.values())
+
+    # Limit to first 2 slices for fast unit test execution
+    slices = dm.get_slices_demand()
+    test_slices = [s for s in slices if s.slice_start_min <= 25.0]
+    expected_veh = sum(s.vehicle_count for s in test_slices)
+
+    # Mock get_slices_demand for engine
+    orig_get = dm.get_slices_demand
+    dm.get_slices_demand = lambda: test_slices  # type: ignore[method-assign]
+    try:
+        summaries, _ = engine.run_assignment(
+            edge_fire_arrivals=arrivals,
+            destination_node_ids=dests,
+            apply_exit_capacities=True,
+        )
+        total_veh_out = sum(
+            sum(t_dict.values()) for t_dict in engine.last_vehicles_per_exit_over_time.values()
+        )
+        assert total_veh_out == expected_veh, (
+            f"Vehicles in ({expected_veh}) != Vehicles out ({total_veh_out})"
+        )
+    finally:
+        dm.get_slices_demand = orig_get
+
+
+def test_phase4f_closure_directional_inbound_only(camp_fire_graph: RoadGraph) -> None:
+    """Phase 4f Task 6: Confirm Hwy 70 closure at Pentz Rd is directional (inbound only)."""
+    cm = CongestionModel(road_graph=camp_fire_graph)
+    hwy70_closures = [c for c in cm.roadway_closures if "70" in c["name"]]
+    assert len(hwy70_closures) >= 1
+    assert hwy70_closures[0].get("inbound_only") is True

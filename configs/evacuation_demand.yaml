@@ -87,11 +87,12 @@ inbound_emergency_corridors:
 
 # Time-dependent roadway closures from empirical field records (NIST TN 2252 sup Table A-2)
 roadway_closures:
-  - name: "Hwy 70 at Pentz Rd"
+  - name: "Hwy 70 at Pentz Rd (Inbound/Northbound only)"
     closure_time_elapsed_min: 54.0   # 07:27 PST (T+54 min)
     lat: 39.649847
     lon: -121.559463
     radius_m: 600.0
+    inbound_only: true
     source_citation: "NIST TN 2252 sup Table A-2 row 07:29 Radio Log (p. 19)"
 
 # Method of Successive Averages (MSA) convergence parameters
@@ -117,11 +118,13 @@ behavior:
   reverse_911_failure_rate: 0.45      # 45% fail to receive CodeRED notification (Table D-2)
   notification_delay_unreached_min: 20.0 # Additional delay for residents not reached by reverse-911
 
-# Official Butte County Evacuation Zones (NIST TN 2252 sup Appendix C; Table 11 p. 94; Census 2010 block join)
+# Butte County Evacuation Zones (approximate Voronoi polygons clipped to 2010 town boundary; 301 populated blocks of 332 total)
+zone_geometry_method: "approximate (Voronoi)"
+
 zones:
   Zone_1:
     source_citation: "NIST TN 2252 Table 11 row Zone 1 (p. 94); Appendix C map (p. 124)"
-    population: 1121
+    population: 1773
     centroid_utm: [619633.8, 4404652.2]
     order_clock_pst: "08:49:00"
     notification_elapsed_min: 136.0    # 08:49 PST (T+136 min from 06:33 PST)
@@ -131,7 +134,7 @@ zones:
 
   Zone_2:
     source_citation: "NIST TN 2252 Table 11 row Zone 2 (p. 94); Appendix C map (p. 124)"
-    population: 3411
+    population: 2439
     centroid_utm: [620904.3, 4404593.0]
     order_clock_pst: "08:01:00"
     notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
@@ -141,7 +144,7 @@ zones:
 
   Zone_3:
     source_citation: "NIST TN 2252 Table 11 row Zone 3 (p. 94); Appendix C map (p. 124)"
-    population: 708
+    population: 1717
     centroid_utm: [622024.3, 4405207.5]
     order_clock_pst: "07:46:00"
     notification_elapsed_min: 73.0     # 07:46 PST (T+73 min)
@@ -151,7 +154,7 @@ zones:
 
   Zone_4:
     source_citation: "NIST TN 2252 Table 11 row Zone 4 (p. 94); Appendix C map (p. 124)"
-    population: 1350
+    population: 1823
     centroid_utm: [616588.1, 4402192.4]
     order_clock_pst: "08:49:00"
     notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
@@ -161,7 +164,7 @@ zones:
 
   Zone_5:
     source_citation: "NIST TN 2252 Table 11 row Zone 5 (p. 94); Appendix C map (p. 124)"
-    population: 4396
+    population: 3185
     centroid_utm: [618530.2, 4403130.0]
     order_clock_pst: "08:49:00"
     notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
@@ -171,7 +174,7 @@ zones:
 
   Zone_6:
     source_citation: "NIST TN 2252 Table 11 row Zone 6 (p. 94); Appendix C map (p. 124)"
-    population: 1993
+    population: 2241
     centroid_utm: [618697.4, 4401704.7]
     order_clock_pst: "08:01:00"
     notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
@@ -181,7 +184,7 @@ zones:
 
   Zone_7:
     source_citation: "NIST TN 2252 Table 11 row Zone 7 (p. 94); Appendix C map (p. 124)"
-    population: 3491
+    population: 3544
     centroid_utm: [620795.9, 4402138.5]
     order_clock_pst: "08:01:00"
     notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)
@@ -191,7 +194,7 @@ zones:
 
   Zone_8:
     source_citation: "NIST TN 2252 Table 11 row Zone 8 (p. 94); Appendix C map (p. 124)"
-    population: 1593
+    population: 1417
     centroid_utm: [622185.1, 4402693.3]
     order_clock_pst: "07:46:00"
     notification_elapsed_min: 73.0     # 07:46 PST (T+73 min)
@@ -201,7 +204,7 @@ zones:
 
   Zone_9:
     source_citation: "NIST TN 2252 Table 11 row Zone 9 (p. 94); Appendix C map (p. 124)"
-    population: 1073
+    population: 1185
     centroid_utm: [616374.2, 4400381.1]
     order_clock_pst: "08:49:00"
     notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
@@ -211,7 +214,7 @@ zones:
 
   Zone_10:
     source_citation: "NIST TN 2252 Table 11 row Zone 10 (p. 94); Appendix C map (p. 124)"
-    population: 876
+    population: 921
     centroid_utm: [616172.5, 4399383.7]
     order_clock_pst: "08:03:00"        # ECC town-wide mandatory declaration (p. 94)
     notification_elapsed_min: 90.0     # 08:03 PST (T+90 min)
@@ -221,7 +224,7 @@ zones:
 
   Zone_11:
     source_citation: "NIST TN 2252 Table 11 row Zone 11 (p. 94); Appendix C map (p. 124)"
-    population: 2352
+    population: 1977
     centroid_utm: [618105.0, 4400194.0]
     order_clock_pst: "08:49:00"
     notification_elapsed_min: 136.0    # 08:49 PST (T+136 min)
@@ -231,7 +234,7 @@ zones:
 
   Zone_12:
     source_citation: "NIST TN 2252 Table 11 row Zone 12 (p. 94); Appendix C map (p. 124)"
-    population: 549
+    population: 832
     centroid_utm: [619652.9, 4400235.0]
     order_clock_pst: "08:03:00"        # ECC town-wide mandatory declaration (p. 94)
     notification_elapsed_min: 90.0     # 08:03 PST (T+90 min)
@@ -241,7 +244,7 @@ zones:
 
   Zone_13:
     source_citation: "NIST TN 2252 Table 11 row Zone 13 (p. 94); Appendix C map (p. 124)"
-    population: 1814
+    population: 1673
     centroid_utm: [620693.9, 4400010.1]
     order_clock_pst: "08:01:00"
     notification_elapsed_min: 88.0     # 08:01 PST (T+88 min)

@@ -228,60 +228,116 @@ class EvacuationDemandModel:
                 blocks_gdf.geometry.centroid.within(con_poly) & (blocks_gdf["POP10"] > 0)
             ].copy()
 
-        block_demands: list[CensusBlockDemand] = []
-        node_vehicles: dict[int, int] = defaultdict(int)
+        def apportion_zone_vehicles(
+            blocks_info: list[dict[str, Any]], target_veh: int
+        ) -> list[int]:
+            if not blocks_info:
+                return []
+            if len(blocks_info) == 1:
+                return [target_veh]
+            total_pop = sum(b["pop"] for b in blocks_info)
+            if total_pop <= 0:
+                return [max(1, target_veh // len(blocks_info))] * len(blocks_info)
+            shares = np.array(
+                [b["pop"] / total_pop * target_veh for b in blocks_info], dtype=np.float64
+            )
+            floor_vals = np.floor(shares).astype(int)
+            if target_veh >= len(blocks_info):
+                for i in range(len(floor_vals)):
+                    if floor_vals[i] < 1:
+                        floor_vals[i] = 1
+            rem = target_veh - int(np.sum(floor_vals))
+            if rem > 0:
+                fracs = shares - floor_vals
+                top_indices = np.argsort(-fracs)[:rem]
+                for idx in top_indices:
+                    floor_vals[idx] += 1
+            elif rem < 0:
+                sort_desc = np.argsort(-floor_vals)
+                for idx in sort_desc:
+                    if rem == 0:
+                        break
+                    if floor_vals[idx] > 1:
+                        deduct = min(floor_vals[idx] - 1, -rem)
+                        floor_vals[idx] -= deduct
+                        rem += deduct
+            return floor_vals.tolist()
 
-        # Process Paradise blocks
+        # Group Paradise blocks by assigned zone
+        paradise_zone_blocks: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for _, blk in p_blocks.iterrows():
             b_pt = blk.geometry.centroid
             pop = int(blk["POP10"])
-            n_veh = max(1, int(np.round(pop / self.occupancy)))
-
-            # Find assigned zone
             assigned_z = "Zone_1"
             for _, z_row in zones_gdf.iterrows():
                 if z_row.geometry.contains(b_pt):
                     assigned_z = z_row.zone_name
                     break
-
-            # Snap to nearest road node
             dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
             snapped_nid = int(node_ids[np.argmin(dists)])
+            paradise_zone_blocks[assigned_z].append(
+                {
+                    "geoid10": str(blk["GEOID10"]),
+                    "pop": pop,
+                    "centroid_utm": (float(b_pt.x), float(b_pt.y)),
+                    "origin_node_id": snapped_nid,
+                }
+            )
 
-            z_obj = self.zones.get(assigned_z, self.zones.get("Zone_1"))
+        block_demands: list[CensusBlockDemand] = []
+        node_vehicles: dict[int, int] = defaultdict(int)
+
+        # Build Paradise block demands with exact vehicle apportionment
+        for z_name, b_list in paradise_zone_blocks.items():
+            z_obj = self.zones.get(z_name, self.zones.get("Zone_1"))
+            target_v = (
+                z_obj.num_vehicles if z_obj else sum(int(b["pop"] / self.occupancy) for b in b_list)
+            )
+            v_alloc = apportion_zone_vehicles(b_list, target_v)
             notif_t = z_obj.notification_elapsed_min if z_obj else 60.0
             dur_t = z_obj.departure_duration_min if z_obj else 90.0
 
-            sched = calculate_departure_schedule(
-                total_vehicles=n_veh,
-                notification_min=notif_t,
-                duration_min=dur_t,
-                time_slice_min=self.time_slice_min,
-                horizon_min=self.horizon_min,
-            )
-
-            block_demands.append(
-                CensusBlockDemand(
-                    geoid10=str(blk["GEOID10"]),
-                    population=pop,
-                    num_vehicles=n_veh,
-                    assigned_zone=assigned_z,
-                    centroid_utm=(float(b_pt.x), float(b_pt.y)),
-                    origin_node_id=snapped_nid,
-                    departure_schedule=sched,
+            for b_info, n_veh in zip(b_list, v_alloc, strict=True):
+                sched = calculate_departure_schedule(
+                    total_vehicles=n_veh,
+                    notification_min=notif_t,
+                    duration_min=dur_t,
+                    time_slice_min=self.time_slice_min,
+                    horizon_min=self.horizon_min,
                 )
-            )
-            node_vehicles[snapped_nid] += n_veh
+                block_demands.append(
+                    CensusBlockDemand(
+                        geoid10=b_info["geoid10"],
+                        population=b_info["pop"],
+                        num_vehicles=n_veh,
+                        assigned_zone=z_name,
+                        centroid_utm=b_info["centroid_utm"],
+                        origin_node_id=b_info["origin_node_id"],
+                        departure_schedule=sched,
+                    )
+                )
+                node_vehicles[b_info["origin_node_id"]] += n_veh
 
-        # Process Magalia blocks
+        # Process Magalia blocks with exact vehicle apportionment
         if len(m_blocks) > 0 and "Magalia" in self.zones:
             z_mag = self.zones["Magalia"]
+            m_list = []
             for _, blk in m_blocks.iterrows():
                 b_pt = blk.geometry.centroid
                 pop = int(blk["POP10"])
-                n_veh = max(1, int(np.round(pop / self.occupancy)))
                 dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
                 snapped_nid = int(node_ids[np.argmin(dists)])
+                m_list.append(
+                    {
+                        "geoid10": str(blk["GEOID10"]),
+                        "pop": pop,
+                        "centroid_utm": (float(b_pt.x), float(b_pt.y)),
+                        "origin_node_id": snapped_nid,
+                    }
+                )
+
+            m_alloc = apportion_zone_vehicles(m_list, z_mag.num_vehicles)
+            for b_info, n_veh in zip(m_list, m_alloc, strict=True):
                 sched = calculate_departure_schedule(
                     total_vehicles=n_veh,
                     notification_min=z_mag.notification_elapsed_min,
@@ -291,26 +347,37 @@ class EvacuationDemandModel:
                 )
                 block_demands.append(
                     CensusBlockDemand(
-                        geoid10=str(blk["GEOID10"]),
-                        population=pop,
+                        geoid10=b_info["geoid10"],
+                        population=b_info["pop"],
                         num_vehicles=n_veh,
                         assigned_zone="Magalia",
-                        centroid_utm=(float(b_pt.x), float(b_pt.y)),
-                        origin_node_id=snapped_nid,
+                        centroid_utm=b_info["centroid_utm"],
+                        origin_node_id=b_info["origin_node_id"],
                         departure_schedule=sched,
                     )
                 )
-                node_vehicles[snapped_nid] += n_veh
+                node_vehicles[b_info["origin_node_id"]] += n_veh
 
-        # Process Concow blocks
+        # Process Concow blocks with exact vehicle apportionment
         if len(c_blocks) > 0 and "Concow" in self.zones:
             z_con = self.zones["Concow"]
+            c_list = []
             for _, blk in c_blocks.iterrows():
                 b_pt = blk.geometry.centroid
                 pop = int(blk["POP10"])
-                n_veh = max(1, int(np.round(pop / self.occupancy)))
                 dists = np.hypot(node_coords[:, 0] - b_pt.x, node_coords[:, 1] - b_pt.y)
                 snapped_nid = int(node_ids[np.argmin(dists)])
+                c_list.append(
+                    {
+                        "geoid10": str(blk["GEOID10"]),
+                        "pop": pop,
+                        "centroid_utm": (float(b_pt.x), float(b_pt.y)),
+                        "origin_node_id": snapped_nid,
+                    }
+                )
+
+            c_alloc = apportion_zone_vehicles(c_list, z_con.num_vehicles)
+            for b_info, n_veh in zip(c_list, c_alloc, strict=True):
                 sched = calculate_departure_schedule(
                     total_vehicles=n_veh,
                     notification_min=z_con.notification_elapsed_min,
@@ -320,16 +387,16 @@ class EvacuationDemandModel:
                 )
                 block_demands.append(
                     CensusBlockDemand(
-                        geoid10=str(blk["GEOID10"]),
-                        population=pop,
+                        geoid10=b_info["geoid10"],
+                        population=b_info["pop"],
                         num_vehicles=n_veh,
                         assigned_zone="Concow",
-                        centroid_utm=(float(b_pt.x), float(b_pt.y)),
-                        origin_node_id=snapped_nid,
+                        centroid_utm=b_info["centroid_utm"],
+                        origin_node_id=b_info["origin_node_id"],
                         departure_schedule=sched,
                     )
                 )
-                node_vehicles[snapped_nid] += n_veh
+                node_vehicles[b_info["origin_node_id"]] += n_veh
 
         # Pulga point demand
         if "Pulga" in self.zones:

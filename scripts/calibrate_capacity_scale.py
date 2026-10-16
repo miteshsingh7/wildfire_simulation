@@ -94,13 +94,13 @@ def run_calibration_check(
         paradise_zones = [z for z in summaries.keys() if z.startswith("Zone_") or "Paradise" in z]
         paradise_clearance_hrs = max(summaries[z].clearance_time_hours for z in paradise_zones)
 
-        # 1. Traversal time Bille -> Almond at 08:45 PST (T+132 min)
-        # Compute dynamic edge traversal times at t = 132 min from accumulated queues
+        # 1. Traversal time Bille -> Almond at 08:45 PST (T+132 min, nearest slice 130.0 min)
         t_bille = 132.0
+        t_bille_slice = 130.0
         dyn_edge_times_bille = np.zeros(len(road_graph.edges), dtype=np.float64)
         for e_idx in range(len(road_graph.edges)):
             cap_e = congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
-            q_e = engine.last_edge_queues_over_time[e_idx].get(t_bille, 0.0)
+            q_e = engine.last_edge_queues_over_time[e_idx].get(t_bille_slice, 0.0)
             q_del = (q_e / cap_e) * 60.0 if cap_e > 0 else 0.0
             dyn_edge_times_bille[e_idx] = (
                 congestion_model.edge_capacities[e_idx].free_traversal_time_min + q_del
@@ -116,12 +116,13 @@ def run_calibration_check(
         )
         sim_bille_t = (route_b.arrival_time_min - t_bille) if route_b else float("inf")
 
-        # 2. Traversal time Kmart -> Almond at 09:00 PST (T+147 min)
+        # 2. Traversal time Kmart -> Almond at 09:00 PST (T+147 min, nearest slice 145.0 min)
         t_kmart = 147.0
+        t_kmart_slice = 145.0
         dyn_edge_times_kmart = np.zeros(len(road_graph.edges), dtype=np.float64)
         for e_idx in range(len(road_graph.edges)):
             cap_e = congestion_model.edge_capacities[e_idx].capacity_veh_per_hr
-            q_e = engine.last_edge_queues_over_time[e_idx].get(t_kmart, 0.0)
+            q_e = engine.last_edge_queues_over_time[e_idx].get(t_kmart_slice, 0.0)
             q_del = (q_e / cap_e) * 60.0 if cap_e > 0 else 0.0
             dyn_edge_times_kmart[e_idx] = (
                 congestion_model.edge_capacities[e_idx].free_traversal_time_min + q_del

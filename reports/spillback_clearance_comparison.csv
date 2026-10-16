@@ -1,0 +1,4 @@
+Model Configuration,Paradise Clearance (h),Mean Zone (h),Notes
+With Physical Spillback Penalty,117.83,92.45,"Includes dynamic queue impedance penalty ((Q - Storage)/Cap)*60 for links exceeding vehicle storage"
+Without Spillback Penalty (Pure Queue Delay),61.23,48.12,"Pure point-queue bottleneck delay (Q/Cap)*60 without secondary link storage penalty"
+Delta from Spillback Penalty,+56.61,+44.33,"Spillback impedance adds 56.61 h to clearance across town"

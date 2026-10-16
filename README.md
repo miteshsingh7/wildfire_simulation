@@ -104,3 +104,13 @@ uv pip install -e ".[dev]"
 ## Compute Split
 - **Local (CPU)**: Ingestion pipeline, graph construction, routing, agent tool invocation, unit/integration tests, and small test simulation runs.
 - **Kaggle GPU**: Bulk simulation runs for training data generation and PyTorch surrogate neural network training.
+
+---
+
+## Model Limitations & Qualitative Clearance Notice
+
+> [!IMPORTANT]
+> All evacuation clearance times, link queuing delays, and corridor congestion metrics produced by `wf052.routing` are **qualitative planning assessments only**.
+> 
+> The macroscopic time-sliced assignment engine employs volume-delay functions (BPR) and link point-queue bottleneck formulations to evaluate relative scenario sensitivities (e.g. contraflow benefits, corridor capacity degradations, and safety margin thresholds). These outputs are intended for risk comparison and decision exploration, and must **not** be construed as certified microscopic operational traffic forecasts or guarantees of empirical evacuation timing. Micro-scale dynamics—including vehicle collisions, smoke-induced visibility reductions, abandoned vehicle blockages, and manual traffic direction—require dedicated agent-based microscopic traffic simulation.
+

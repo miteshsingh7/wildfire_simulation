@@ -1,0 +1,14 @@
+Roadway,From_To,Lanes,Through,Width_ft,Speed_mph,Graph_Highway,Config_Lanes
+Skyway (Upper),Stirling City to Nimshew Dr,2,2,23-25,25-35,secondary,1
+Skyway (Magalia),Woodward Dr to Coutolenc Rd,3,2,32-40,30-40,secondary,1
+Skyway (Paradise North),Clark Rd to Bille Rd,2,2,22-30,30-35,primary,1
+Skyway (Paradise Commercial),Bille Rd to Pearson Rd,5,4,60,35-45,primary,2
+Skyway (Paradise South),Pearson Rd to Neal Rd,5,4,60,45-50,primary,2
+Skyway (Expressway SB),Lane Divide to Potter Rd,2,2,23-28,55-65,trunk,2
+Clark Rd (North),Skyway to Wagstaff Rd,2,2,22-26,35-40,secondary,1
+Clark Rd (Central/CA-191),Wagstaff Rd to Pearson Rd,3,2,32-40,40-45,primary,1
+Pentz Rd (North),Skyway to Bille Rd,2,2,20-26,35-40,tertiary,1
+Pentz Rd (South),Bille Rd to Pearson Rd,2,2,22-28,40-45,tertiary,1
+Pearson Rd (East),Pentz Rd to Clark Rd,2,2,22-33,35-40,secondary,1
+Pearson Rd (West),Clark Rd to Skyway,4,4,46-60,30-35,secondary,2
+Neal Rd,Skyway to CA-99,2,2,24-32,45-55,secondary,1

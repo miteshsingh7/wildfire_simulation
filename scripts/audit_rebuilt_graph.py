@@ -86,7 +86,9 @@ def audit_graph_integrity(
     s_dups = pd.Series(records).value_counts()
     dups_count = int((s_dups > 1).sum())
     total_dup_instances = int(s_dups[s_dups > 1].sum()) - dups_count if dups_count > 0 else 0
-    print(f"Duplicate (osmid, u, v) edge keys: {dups_count} (total redundant instances: {total_dup_instances})")
+    print(
+        f"Duplicate (osmid, u, v) edge keys: {dups_count} (total redundant instances: {total_dup_instances})"
+    )
 
     # 2. Network Connectivity (SCC / WCC)
     di_g = nx.DiGraph()
@@ -103,9 +105,13 @@ def audit_graph_integrity(
     print(f"Total Directed Graph Nodes: {di_g.number_of_nodes()}")
     print(f"Total Directed Graph Edges: {di_g.number_of_edges()}")
     print(f"Number of SCCs: {len(scc_list)}")
-    print(f"Largest SCC Size: {largest_scc_size} nodes ({largest_scc_size/max(1, di_g.number_of_nodes())*100:.2f}%)")
+    print(
+        f"Largest SCC Size: {largest_scc_size} nodes ({largest_scc_size / max(1, di_g.number_of_nodes()) * 100:.2f}%)"
+    )
     print(f"Number of WCCs: {len(wcc_list)}")
-    print(f"Largest WCC Size: {largest_wcc_size} nodes ({largest_wcc_size/max(1, di_g.number_of_nodes())*100:.2f}%)")
+    print(
+        f"Largest WCC Size: {largest_wcc_size} nodes ({largest_wcc_size / max(1, di_g.number_of_nodes()) * 100:.2f}%)"
+    )
 
     # 3. Crossing edges without an intersection node
     # Check for edges that spatially intersect each other at points that are NOT their shared endpoints
@@ -137,7 +143,9 @@ def audit_graph_integrity(
             geom2 = row2.geometry
             if geom2 is None or geom2.is_empty:
                 continue
-            u2, v2 = (idx2[0], idx2[1]) if isinstance(idx2, tuple) else (row2.get("u"), row2.get("v"))
+            u2, v2 = (
+                (idx2[0], idx2[1]) if isinstance(idx2, tuple) else (row2.get("u"), row2.get("v"))
+            )
 
             # If they share an endpoint, an intersection at endpoint is expected
             if {u1, v1} & {u2, v2}:
@@ -153,13 +161,19 @@ def audit_graph_integrity(
     # 4. Graph Extent vs Domain Bounding Box
     gdf_wgs84 = edges_gdf.to_crs(epsg=4326) if edges_gdf.crs != "EPSG:4326" else edges_gdf
     bounds = gdf_wgs84.total_bounds
-    print(f"Graph Extent (WGS84): [west={bounds[0]:.4f}, south={bounds[1]:.4f}, east={bounds[2]:.4f}, north={bounds[3]:.4f}]")
-    print(f"Domain BBox (WGS84): [west={DOMAIN_BBOX_WGS84['west']:.4f}, south={DOMAIN_BBOX_WGS84['south']:.4f}, east={DOMAIN_BBOX_WGS84['east']:.4f}, north={DOMAIN_BBOX_WGS84['north']:.4f}]")
+    print(
+        f"Graph Extent (WGS84): [west={bounds[0]:.4f}, south={bounds[1]:.4f}, east={bounds[2]:.4f}, north={bounds[3]:.4f}]"
+    )
+    print(
+        f"Domain BBox (WGS84): [west={DOMAIN_BBOX_WGS84['west']:.4f}, south={DOMAIN_BBOX_WGS84['south']:.4f}, east={DOMAIN_BBOX_WGS84['east']:.4f}, north={DOMAIN_BBOX_WGS84['north']:.4f}]"
+    )
     covers_west = bounds[0] <= DOMAIN_BBOX_WGS84["west"]
     covers_south = bounds[1] <= DOMAIN_BBOX_WGS84["south"]
     covers_east = bounds[2] >= DOMAIN_BBOX_WGS84["east"]
     covers_north = bounds[3] >= DOMAIN_BBOX_WGS84["north"]
-    print(f"Domain Coverage: West={covers_west}, South={covers_south}, East={covers_east}, North={covers_north}")
+    print(
+        f"Domain Coverage: West={covers_west}, South={covers_south}, East={covers_east}, North={covers_north}"
+    )
 
     return {
         "nodes": len(nodes_gdf),
