@@ -124,6 +124,9 @@ class SurrogateSample:
     censor_mask: np.ndarray  # (256, 256) float32 {0, 1} (1=unburned/censored)
     scaffold_tag: str  # Tag: "scaffold" + teacher_config_hash
     seed: int
+    source: str = (
+        "analytic_wind_ellipse"  # Source generator ("analytic_wind_ellipse", "teacher_v1_cellular")
+    )
 
 
 @dataclass(frozen=True)

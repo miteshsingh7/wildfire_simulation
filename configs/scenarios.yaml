@@ -39,10 +39,43 @@ training_fires:
     tile_dir: "data/tiles/fires/zogg"
     base_ignition_clock_utc: "2020-09-27T21:51:00Z"
 
-# Never include the Camp Fire domain in surrogate training scenarios
+# Never include the Camp Fire domain or Phase 1B fresh held-out test fires in surrogate training
 prohibited_domains:
   - "camp_fire_2018"
   - "data/tiles/elevation.tif"
+
+held_out_fires:
+  - name: "camp_fire_2018"
+    aliases: ["camp", "camp_fire", "campfire", "camp_fire_2018"]
+    reason: "Primary operational evaluation domain (Phase 0 / 1A held-out)"
+  - name: "slater_and_devil_2020"
+    aliases: ["slater", "slater_and_devil", "slater_and_devil_2020", "slater-and-devil"]
+    reason: "Phase 1B fresh held-out wind-driven test fire #1"
+  - name: "walker_2019"
+    aliases: ["walker", "walker_2019", "walker-2019"]
+    reason: "Phase 1B fresh held-out wind-driven test fire #2"
+  - name: "w5_cold_springs_2020"
+    aliases: ["w5", "w5_cold_springs", "w-5_cold_springs", "w5_cold_springs_2020"]
+    reason: "Phase 1B alternate fresh held-out fire #3"
+
+stratified_sampling:
+  enabled: true
+  min_burned_fraction: 0.02           # Reject stalled/near-empty samples (<2% burned)
+  target_spread_bins:
+    low: [0.02, 0.15]
+    medium: [0.15, 0.35]
+    high: [0.35, 1.0]
+  samples_per_bin_ratio: [0.3, 0.4, 0.3]
+
+storage:
+  arrival_scale_factor: 10.0          # uint16 tenths-of-a-minute precision (0.1 min = 6 s)
+  censor_mask_bitpacked: true         # 8192 bytes per 256x256 tile
+  static_layers_dtype: "float16"
+
+adapter:
+  p_threshold_default: 0.5            # Cells with P(burned) < 0.5 assigned +inf arrival
+  crs_default: "EPSG:32610"
+  tile_overlap_m: 60.0
 
 ensemble:
   num_members: 20
