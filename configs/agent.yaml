@@ -1,0 +1,20 @@
+# Agent Configuration (Phase 5A)
+agent:
+  buffer_minutes: 15.0                 # Minimum required safety buffer B (minutes)
+  arrival_field_change_threshold: 15.0 # Mean difference (min) across active area to trigger re-plan
+  hysteresis_margin_min: 5.0           # Margin improvement required to switch route (minutes)
+  hysteresis_time_pct: 0.10            # Travel time improvement required to switch route (10%)
+  log_file: "output/agent_run_log.jsonl"
+
+confidence:
+  min_spread_area_cells: 5             # If burned cells <= 5, flag low confidence (no spread beyond ignition)
+
+brief:
+  standing_caveat: >-
+    Standing Caveat: The fire model may not capture ember spotting, long-range firebrands,
+    or unmodeled secondary ignitions; areas outside the predicted fire perimeter are not
+    guaranteed safe.
+  low_confidence_notice: >-
+    ALERT: Arrival field is flagged LOW CONFIDENCE (fire model shows no significant spread
+    beyond the ignition zone). Field observations or sensor coverage may be incomplete.
+  qualitative_clearance: true          # Enforce qualitative-only clearance descriptions (no hours)
