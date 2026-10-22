@@ -37,7 +37,7 @@ def surrogate_output_to_arrival_field(
     y_coords: np.ndarray | Sequence[float],
     crs: str = "EPSG:32610",
     ignition_time: str = "2020-09-06T19:00:00Z",
-    p_thr: float = 0.5,
+    p_thr: float = 0.1,
 ) -> xr.Dataset:
     """Convert surrogate neural model outputs into an xarray ArrivalField satisfying router contract.
 
@@ -108,7 +108,7 @@ def stitch_tiles_to_arrival_field(
     resolution_m: float = 60.0,
     crs: str = "EPSG:32610",
     ignition_time: str = "2020-09-06T19:00:00Z",
-    p_thr: float = 0.5,
+    p_thr: float = 0.1,
 ) -> xr.Dataset:
     """Stitch multiple overlapping tile predictions into a seamless full-domain ArrivalField.
 
@@ -220,3 +220,47 @@ def stitch_tiles_to_arrival_field(
 
     validate_arrival_field(ds)
     return ds
+
+
+def compute_burn_head_miss_rates(
+    pred_burn_probs: np.ndarray | torch.Tensor,
+    censor_masks: np.ndarray | torch.Tensor,
+    thresholds: Sequence[float] = (0.05, 0.1, 0.25, 0.5),
+) -> dict[float, float]:
+    """Compute burn-head miss rate (False Negative Rate) across probability thresholds.
+
+    Miss rate = (Number of burned cells where P(burned) < thr) / (Total burned cells).
+    A missed burn cell leads to an omitted arrival time (+inf) in evacuation routing,
+    so minimizing miss rate at low thresholds (e.g. 0.10) directly improves evacuation safety.
+
+    Args:
+        pred_burn_probs: Array or tensor of predicted burn probabilities in [0, 1].
+        censor_masks: Array or tensor of ground truth censor masks (0 = burned, 1 = unburned/censored).
+        thresholds: Sequence of probability thresholds to evaluate.
+
+    Returns:
+        Mapping from threshold -> miss rate (float in [0, 1]).
+    """
+    if isinstance(pred_burn_probs, torch.Tensor):
+        probs = pred_burn_probs.detach().cpu().float().numpy().ravel()
+    else:
+        probs = np.asarray(pred_burn_probs, dtype=np.float32).ravel()
+
+    if isinstance(censor_masks, torch.Tensor):
+        censor = censor_masks.detach().cpu().float().numpy().ravel()
+    else:
+        censor = np.asarray(censor_masks, dtype=np.float32).ravel()
+
+    is_burned = censor < 0.5
+    total_burned = int(np.sum(is_burned))
+
+    if total_burned == 0:
+        return {float(thr): 0.0 for thr in thresholds}
+
+    burned_probs = probs[is_burned]
+    miss_rates: dict[float, float] = {}
+    for thr in thresholds:
+        misses = int(np.sum(burned_probs < float(thr)))
+        miss_rates[float(thr)] = float(misses / total_burned)
+
+    return miss_rates

@@ -190,14 +190,20 @@ class WindConditionedUNet(nn.Module):
 
         # Decoder
         u3 = self.up3(b)
+        if u3.shape[2:] != x3.shape[2:]:
+            u3 = F.interpolate(u3, size=x3.shape[2:], mode="bilinear", align_corners=False)
         c3 = torch.cat([u3, x3], dim=1)
         y3 = self.dec3(c3, z_wind)
 
         u2 = self.up2(y3)
+        if u2.shape[2:] != x2.shape[2:]:
+            u2 = F.interpolate(u2, size=x2.shape[2:], mode="bilinear", align_corners=False)
         c2 = torch.cat([u2, x2], dim=1)
         y2 = self.dec2(c2, z_wind)
 
         u1 = self.up1(y2)
+        if u1.shape[2:] != x1.shape[2:]:
+            u1 = F.interpolate(u1, size=x1.shape[2:], mode="bilinear", align_corners=False)
         c1 = torch.cat([u1, x1], dim=1)
         y1 = self.dec1(c1, z_wind)
 
@@ -207,6 +213,15 @@ class WindConditionedUNet(nn.Module):
 
         # Burn logits: unconstrained logits
         burn_logits = self.burn_logit_head(y1)
+
+        # Ensure output exactly matches input spatial dimensions if odd dimensions were rounded
+        if quantiles.shape[2:] != spatial_features.shape[2:]:
+            quantiles = F.interpolate(
+                quantiles, size=spatial_features.shape[2:], mode="bilinear", align_corners=False
+            )
+            burn_logits = F.interpolate(
+                burn_logits, size=spatial_features.shape[2:], mode="bilinear", align_corners=False
+            )
 
         return ModelOutput(quantiles=quantiles, burn_logits=burn_logits)
 

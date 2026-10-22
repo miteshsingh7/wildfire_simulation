@@ -127,6 +127,7 @@ class SurrogateSample:
     source: str = (
         "analytic_wind_ellipse"  # Source generator ("analytic_wind_ellipse", "teacher_v1_cellular")
     )
+    baseline_only: bool = False  # Flag for baseline-only samples (e.g. analytic ellipse)
 
 
 @dataclass(frozen=True)

@@ -56,6 +56,8 @@ def create_synthetic_sample(
     sample_id: str = "test_01",
     shape: tuple[int, int] = (256, 256),
     seed: int = 1234,
+    source: str = "teacher_v1_cellular",
+    baseline_only: bool = False,
 ) -> SurrogateSample:
     """Helper to create a valid synthetic stand-in sample conforming to data contract."""
     rng = np.random.RandomState(seed)
@@ -97,6 +99,8 @@ def create_synthetic_sample(
         censor_mask=c_mask,
         scaffold_tag="scaffold_test_hash",
         seed=seed,
+        source=source,
+        baseline_only=baseline_only,
     )
 
 

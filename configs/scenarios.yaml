@@ -60,12 +60,13 @@ held_out_fires:
 
 stratified_sampling:
   enabled: true
-  min_burned_fraction: 0.02           # Reject stalled/near-empty samples (<2% burned)
+  min_burned_fraction: 0.00           # Can cover full range [0.0, 1.0]
   target_spread_bins:
-    low: [0.02, 0.15]
-    medium: [0.15, 0.35]
-    high: [0.35, 1.0]
-  samples_per_bin_ratio: [0.3, 0.4, 0.3]
+    bin_0_0_2: [0.0, 0.2]
+    bin_0_2_0_5: [0.2, 0.5]
+    bin_0_5_0_9: [0.5, 0.9]
+    bin_above_0_9: [0.9, 1.0]
+  target_proportions: [0.25, 0.25, 0.25, 0.25]
 
 storage:
   arrival_scale_factor: 10.0          # uint16 tenths-of-a-minute precision (0.1 min = 6 s)
@@ -73,13 +74,17 @@ storage:
   static_layers_dtype: "float16"
 
 adapter:
-  p_threshold_default: 0.5            # Cells with P(burned) < 0.5 assigned +inf arrival
+  p_threshold_default: 0.1            # Cells with P(burned) < 0.1 assigned +inf arrival (Phase 2C)
   crs_default: "EPSG:32610"
   tile_overlap_m: 60.0
 
 ensemble:
   num_members: 20
   base_seed: 42000
+  wind_scaling:
+    enabled: true
+    peak_sustained_speed_min_mps: 1.0
+    peak_sustained_speed_max_mps: 20.0
   perturbations:
     wind_speed_multiplier_range: [0.80, 1.20]       # +/- 20% wind speed
     wind_direction_jitter_deg_range: [-30.0, 30.0]  # +/- 30 degrees wind direction

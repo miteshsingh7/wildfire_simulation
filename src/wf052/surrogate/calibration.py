@@ -224,3 +224,138 @@ class SplitConformalCalibrator:
 
         covered = (y[valid] >= q10[valid]) & (y[valid] <= q90[valid])
         return float(np.mean(covered))
+
+
+@dataclass(frozen=True)
+class OneSidedCalibrationResult:
+    """Results from one-sided lower quantile conformal calibration for q10."""
+
+    target_coverage: float
+    coverage_before: float
+    coverage_after: float
+    delta_adjustment: float
+    num_calibration_points: int
+
+
+class OneSidedLowerConformalCalibrator:
+    """One-sided lower-quantile conformal calibrator for q10 (earliest arrival time).
+
+    Calibrates predicted q10 quantiles using one-sided residuals on uncensored cells to guarantee
+    finite-sample marginal coverage P(Y >= q10_calibrated) >= target_coverage (default 90%).
+    Kept strictly separate from two-sided SplitConformalCalibrator.
+    """
+
+    def __init__(self, target_coverage: float = 0.90) -> None:
+        if not 0.0 < target_coverage < 1.0:
+            raise ValueError(f"Target coverage must be in (0, 1), got {target_coverage}")
+        self.target_coverage = target_coverage
+        self.alpha = 1.0 - target_coverage
+        self.is_fitted = False
+        self.delta: float = 0.0
+        self.num_calibration_points: int = 0
+
+    def fit(
+        self,
+        pred_q10: np.ndarray,
+        true_arrival: np.ndarray,
+        censor_mask: np.ndarray | None = None,
+    ) -> OneSidedCalibrationResult:
+        """Fit one-sided conformal score adjustment for q10.
+
+        Conformity score: E_i = q10(x_i) - y_i.
+        Guarantee: P(Y >= q10 - delta) >= 1 - alpha.
+        """
+        if pred_q10.ndim == 4 and pred_q10.shape[1] == 3:
+            q10 = pred_q10[:, 0].ravel()
+        elif pred_q10.ndim == 3 and pred_q10.shape[0] == 3:
+            q10 = pred_q10[0].ravel()
+        else:
+            q10 = np.asarray(pred_q10).ravel()
+
+        y = np.asarray(true_arrival).ravel()
+
+        if censor_mask is not None:
+            c_mask = np.asarray(censor_mask).ravel()
+            valid = (c_mask < 0.5) & np.isfinite(y) & np.isfinite(q10)
+        else:
+            valid = np.isfinite(y) & np.isfinite(q10)
+
+        q10_valid = q10[valid]
+        y_valid = y[valid]
+
+        n = len(y_valid)
+        if n < 10:
+            raise ValueError(f"Insufficient calibration points for one-sided calibration (got {n})")
+
+        self.num_calibration_points = n
+
+        # Initial non-exceedance coverage before recalibration: P(y >= q10)
+        cov_before = float(np.mean(y_valid >= q10_valid))
+
+        # One-sided error scores: E_i = q10_i - y_i
+        e_scores = q10_valid - y_valid
+        level = min(1.0, np.ceil((n + 1) * (1.0 - self.alpha)) / n)
+        self.delta = float(np.quantile(e_scores, level, method="higher"))
+        self.is_fitted = True
+
+        q10_adj = q10_valid - self.delta
+        cov_after = float(np.mean(y_valid >= q10_adj))
+
+        return OneSidedCalibrationResult(
+            target_coverage=self.target_coverage,
+            coverage_before=cov_before,
+            coverage_after=cov_after,
+            delta_adjustment=self.delta,
+            num_calibration_points=n,
+        )
+
+    def calibrate(
+        self,
+        pred_q10: np.ndarray,
+        horizon_min: float = 720.0,
+    ) -> np.ndarray:
+        """Apply fitted one-sided calibration adjustment to q10."""
+        if not self.is_fitted:
+            raise RuntimeError(
+                "OneSidedLowerConformalCalibrator must be fit before calling calibrate()"
+            )
+
+        calibrated = np.copy(pred_q10)
+        if calibrated.ndim == 4 and calibrated.shape[1] == 3:
+            q10_adj = np.clip(calibrated[:, 0] - self.delta, 0.0, horizon_min)
+            calibrated[:, 0] = q10_adj
+        elif calibrated.ndim == 3 and calibrated.shape[0] == 3:
+            q10_adj = np.clip(calibrated[0] - self.delta, 0.0, horizon_min)
+            calibrated[0] = q10_adj
+        else:
+            calibrated = np.clip(calibrated - self.delta, 0.0, horizon_min)
+
+        return calibrated
+
+    @staticmethod
+    def evaluate_lower_coverage(
+        pred_q10: np.ndarray,
+        true_arrival: np.ndarray,
+        censor_mask: np.ndarray | None = None,
+    ) -> float:
+        """Compute empirical coverage fraction of lower bound: P(Y >= q10)."""
+        if pred_q10.ndim == 4 and pred_q10.shape[1] == 3:
+            q10 = pred_q10[:, 0].ravel()
+        elif pred_q10.ndim == 3 and pred_q10.shape[0] == 3:
+            q10 = pred_q10[0].ravel()
+        else:
+            q10 = np.asarray(pred_q10).ravel()
+
+        y = np.asarray(true_arrival).ravel()
+
+        if censor_mask is not None:
+            c = np.asarray(censor_mask).ravel()
+            valid = (c < 0.5) & np.isfinite(y) & np.isfinite(q10)
+        else:
+            valid = np.isfinite(y) & np.isfinite(q10)
+
+        if not np.any(valid):
+            return 1.0
+
+        covered = y[valid] >= q10[valid]
+        return float(np.mean(covered))

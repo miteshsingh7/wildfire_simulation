@@ -176,21 +176,178 @@ def load_fire_rasters_crop(
         if np.nanmax(canopy) > 1.0:
             canopy = np.clip(canopy / 100.0, 0.0, 1.0)
 
-    # Weather: read HRRR hourly parquet
+    # Weather: read HRRR hourly parquet with synthetic scaling
     weather_p = fire_dir / "hrrr_weather_hourly.parquet"
     if weather_p.exists():
-        w_df = pd.read_parquet(weather_p)
-        u_vals = w_df["u10_ms"].values[:12] if "u10_ms" in w_df else np.full(12, 5.0)
-        v_vals = w_df["v10_ms"].values[:12] if "v10_ms" in w_df else np.full(12, 5.0)
-        if len(u_vals) < 12:
-            u_vals = np.pad(u_vals, (0, 12 - len(u_vals)), mode="edge")
-            v_vals = np.pad(v_vals, (0, 12 - len(v_vals)), mode="edge")
-        hourly_uv = np.stack([u_vals[:12], v_vals[:12]], axis=-1).astype(np.float32)
+        hourly_uv = sample_hrrr_wind_series(fire_dir, rng=None, window_hours=12)
     else:
         # Default stand-in wind
         hourly_uv = np.tile([6.0, 4.0], (12, 1)).astype(np.float32)
 
     return fbfm, elev, canopy, hourly_uv
+
+
+def sample_hrrr_wind_series(
+    fire_dir: Path,
+    rng: np.random.RandomState | None = None,
+    window_hours: int = 12,
+    target_peak_speed_range: tuple[float, float] = (1.0, 20.0),
+) -> np.ndarray:
+    """Sample a 12-hour wind series from HRRR weather parquet with synthetic peak wind scaling.
+
+    1. Reads hrrr_weather_hourly.parquet for the fire (containing 25 hourly observations).
+    2. Randomly slices a 12-hour window.
+    3. Synthetically scales wind vectors so peak sustained wind covers target_peak_speed_range ([1, 20] m/s).
+
+    Returns:
+        hourly_uv: (12, 2) float32 array of (u, v) wind vectors in m/s.
+    """
+    if rng is None:
+        rng = np.random.RandomState(42)
+
+    weather_p = fire_dir / "hrrr_weather_hourly.parquet"
+    if weather_p.exists():
+        w_df = pd.read_parquet(weather_p)
+        u_all = w_df["u10_ms"].values if "u10_ms" in w_df else np.full(24, 4.0)
+        v_all = w_df["v10_ms"].values if "v10_ms" in w_df else np.full(24, 3.0)
+        n_obs = len(u_all)
+        if n_obs >= window_hours:
+            start_idx = int(rng.randint(0, n_obs - window_hours + 1))
+            u_win = u_all[start_idx : start_idx + window_hours].astype(np.float32)
+            v_win = v_all[start_idx : start_idx + window_hours].astype(np.float32)
+        else:
+            u_win = np.pad(u_all, (0, max(0, window_hours - n_obs)), mode="edge")[:window_hours].astype(np.float32)
+            v_win = np.pad(v_all, (0, max(0, window_hours - n_obs)), mode="edge")[:window_hours].astype(np.float32)
+    else:
+        # Default fallback
+        u_win = np.full(window_hours, 5.0, dtype=np.float32)
+        v_win = np.full(window_hours, 3.0, dtype=np.float32)
+
+    # Base peak sustained wind speed across the 12-hour window
+    base_speeds = np.hypot(u_win, v_win)
+    base_peak = float(np.max(base_speeds))
+
+    # Synthetic scaling to cover [1.0, 20.0] m/s peak sustained wind
+    target_peak = float(rng.uniform(target_peak_speed_range[0], target_peak_speed_range[1]))
+    scale = (target_peak / base_peak) if base_peak > 1e-4 else 1.0
+
+    u_scaled = (u_win * scale).astype(np.float32)
+    v_scaled = (v_win * scale).astype(np.float32)
+
+    return np.stack([u_scaled, v_scaled], axis=-1).astype(np.float32)
+
+
+def assign_burn_fraction_bin(bf: float) -> int:
+    """Assign burned fraction in [0, 1] to one of 4 stratification bins:
+    0: [0.0, 0.2)
+    1: [0.2, 0.5)
+    2: [0.5, 0.9)
+    3: [0.9, 1.0]
+    """
+    if bf < 0.2:
+        return 0
+    if bf < 0.5:
+        return 1
+    if bf < 0.9:
+        return 2
+    return 3
+
+
+def compute_stratified_histogram(
+    burned_fractions: Sequence[float],
+) -> dict[str, Any]:
+    """Compute counts and percentages across the 4 burned fraction bins:
+    - [0.0, 0.2)
+    - [0.2, 0.5)
+    - [0.5, 0.9)
+    - [0.9, 1.0]
+    """
+    labels = ["0-0.2", "0.2-0.5", "0.5-0.9", ">0.9"]
+    bins = [(0.0, 0.2), (0.2, 0.5), (0.5, 0.9), (0.9, 1.0)]
+    counts = [0, 0, 0, 0]
+    for bf in burned_fractions:
+        counts[assign_burn_fraction_bin(float(bf))] += 1
+    total = len(burned_fractions)
+    pcts = [(c / max(1, total)) * 100.0 for c in counts]
+    return {
+        "labels": labels,
+        "bins": bins,
+        "counts": counts,
+        "percentages": pcts,
+        "total": total,
+    }
+
+
+def stratify_samples_by_burned_fraction(
+    samples: Sequence[SurrogateSample],
+    target_proportions: Sequence[float] = (0.25, 0.25, 0.25, 0.25),
+    total_samples: int | None = None,
+    seed: int = 42,
+) -> tuple[list[SurrogateSample], dict[str, Any], dict[str, Any]]:
+    """Subsample / stratify a pool of samples to match target burned fraction bin proportions.
+
+    Bins:
+    - [0.0, 0.2)
+    - [0.2, 0.5)
+    - [0.5, 0.9)
+    - [0.9, 1.0]
+
+    Returns:
+        (stratified_samples, hist_before, hist_after)
+    """
+    rng = np.random.RandomState(seed)
+
+    bin_buckets: list[list[SurrogateSample]] = [[], [], [], []]
+    bf_all: list[float] = []
+    for s in samples:
+        bf = float(np.mean(s.censor_mask < 0.5))
+        bf_all.append(bf)
+        bin_buckets[assign_burn_fraction_bin(bf)].append(s)
+
+    hist_before = compute_stratified_histogram(bf_all)
+
+    if total_samples is None:
+        total_samples = len(samples)
+
+    norm_props = np.array(target_proportions, dtype=np.float64)
+    norm_props = norm_props / np.sum(norm_props)
+
+    stratified: list[SurrogateSample] = []
+    for bin_idx in range(4):
+        target_k = int(round(total_samples * norm_props[bin_idx]))
+        pool = bin_buckets[bin_idx]
+        if not pool:
+            continue
+        if len(pool) >= target_k:
+            chosen_indices = rng.choice(len(pool), size=target_k, replace=False)
+            stratified.extend([pool[i] for i in chosen_indices])
+        else:
+            stratified.extend(pool)
+            if target_k > len(pool):
+                extra_indices = rng.choice(len(pool), size=target_k - len(pool), replace=True)
+                stratified.extend([pool[i] for i in extra_indices])
+
+    bf_after = [float(np.mean(s.censor_mask < 0.5)) for s in stratified]
+    hist_after = compute_stratified_histogram(bf_after)
+
+    return stratified, hist_before, hist_after
+
+
+def format_stratification_report(hist_before: dict[str, Any], hist_after: dict[str, Any]) -> str:
+    """Format before and after stratification histograms as a readable markdown table."""
+    lines = [
+        "| Burned Fraction Bin | Before Count | Before % | After Count | After % |",
+        "| :--- | :---: | :---: | :---: | :---: |",
+    ]
+    for lbl, b_cnt, b_pct, a_cnt, a_pct in zip(
+        hist_before["labels"],
+        hist_before["counts"],
+        hist_before["percentages"],
+        hist_after["counts"],
+        hist_after["percentages"],
+    ):
+        lines.append(f"| `{lbl}` | {b_cnt} | {b_pct:.1f}% | {a_cnt} | {a_pct:.1f}% |")
+    return "\n".join(lines)
 
 
 def generate_analytic_arrival_surface(
@@ -374,7 +531,7 @@ def generate_ensemble_samples(
     for fire in fire_names:
         verify_fire_not_excluded(fire, scenarios_config_path)
 
-        fbfm_base, elev_base, canopy_base, wind_base = load_fire_rasters_crop(
+        fbfm_base, elev_base, canopy_base, _ = load_fire_rasters_crop(
             fire_name=fire,
             tile_size=tile_size,
             scenarios_config_path=scenarios_config_path,
@@ -400,6 +557,17 @@ def generate_ensemble_samples(
             else:
                 current_source = "analytic_wind_ellipse"
 
+            # Ellipse samples are baseline-only; teacher_v1 samples can be used for training
+            is_baseline_only = current_source == "analytic_wind_ellipse"
+
+            # Sample HRRR 12-hour wind window with synthetic scaling covering 1 to 20 m/s
+            wind_base = sample_hrrr_wind_series(
+                fire_dir=Path("data/tiles/fires") / fire,
+                rng=rng,
+                window_hours=12,
+                target_peak_speed_range=(1.0, 20.0),
+            )
+
             # Ensemble perturbations with stratified sampling retry if needed
             max_attempts = 10 if strat_enabled else 1
             arr_time: np.ndarray | None = None
@@ -409,8 +577,8 @@ def generate_ensemble_samples(
 
             for attempt in range(max_attempts):
                 spd_boost = 1.0 + (attempt * 0.05 if strat_enabled else 0.0)
-                spd_mult = float(rng.uniform(0.80, 1.20)) * spd_boost
-                dir_jitter_deg = float(rng.uniform(-30.0, 30.0))
+                spd_mult = float(rng.uniform(0.90, 1.10)) * spd_boost
+                dir_jitter_deg = float(rng.uniform(-20.0, 20.0))
                 ign_offset_r = int(rng.randint(-10, 11))
                 ign_offset_c = int(rng.randint(-10, 11))
                 lb_jitter = float(rng.uniform(-0.3, 0.3))
@@ -485,6 +653,7 @@ def generate_ensemble_samples(
                     scaffold_tag=scaffold_tag,
                     seed=seed,
                     source=current_source,
+                    baseline_only=is_baseline_only,
                 )
             )
 

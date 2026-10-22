@@ -95,6 +95,22 @@ class SurrogateTrainer:
         self.config = config or TrainConfig()
         set_reproducible_seed(self.config.seed)
 
+        # Strict training data constraint (Phase 2C):
+        # Training strictly uses teacher_v1 labels only.
+        # Ellipse samples are flagged baseline_only and rejected by the trainer.
+        rejected = [
+            s.sample_id
+            for s in train_samples
+            if getattr(s, "baseline_only", False)
+            or getattr(s, "source", "") == "analytic_wind_ellipse"
+        ]
+        if rejected:
+            raise ValueError(
+                f"SurrogateTrainer rejected {len(rejected)} sample(s) with baseline_only=True or "
+                f"source='analytic_wind_ellipse'. Training strictly requires teacher_v1 labels only. "
+                f"First rejected sample: '{rejected[0]}'."
+            )
+
         if device is None:
             self.device = torch.device(
                 "cuda"
