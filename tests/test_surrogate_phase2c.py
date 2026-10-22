@@ -38,9 +38,14 @@ from wf052.surrogate.latency import (
 from wf052.surrogate.model import WindConditionedUNet
 from wf052.surrogate.standin_generator import (
     assign_burn_fraction_bin,
+    compute_burned_fraction_by_wind_bin,
     compute_stratified_histogram,
+    compute_wind_distribution_table,
     format_stratification_report,
+    generate_stratified_samples_rejection,
     sample_hrrr_wind_series,
+    sample_to_metadata_dict,
+    save_shard_with_metadata,
     stratify_samples_by_burned_fraction,
 )
 from wf052.surrogate.trainer import SurrogateTrainer, TrainConfig
@@ -212,6 +217,92 @@ class TestPhase2CStratification:
         assert "| Burned Fraction Bin | Before Count | Before % | After Count | After % |" in report
         assert "0-0.2" in report
         assert ">0.9" in report
+
+    def test_rejection_sampling_quotas_and_uniqueness(self) -> None:
+        """Requirement 1: Rejection sampling fills quotas without duplicates."""
+        quotas = [0, 0, 0, 4]  # Quota for >0.9 bin
+        samples, report = generate_stratified_samples_rejection(
+            fire_names=["caldor"],
+            target_quotas=quotas,
+            max_attempts=50,
+            base_seed=1000,
+            tile_size=(64, 64),
+            source_mode="teacher_v1_cellular",
+        )
+
+        assert len(samples) == 4
+        # Verify no duplicate sample IDs or seeds
+        sample_ids = [s.sample_id for s in samples]
+        seeds = [s.seed for s in samples]
+        assert len(set(sample_ids)) == len(sample_ids)
+        assert len(set(seeds)) == len(seeds)
+
+        # Verify report
+        assert report.total_accepted == 4
+        assert report.total_generated >= 4
+        assert len(report.stats) == 4
+        assert report.stats[3].unique_count == 4
+        assert report.stats[3].filled is True
+        md = report.to_markdown()
+        assert "| Bin | Range | Target Quota | Generated | Rejected | Unique Count | Status |" in md
+
+    def test_rejection_sampling_cap_and_plain_reporting(self) -> None:
+        """Requirement 1: Plain reporting when quota cannot be filled within cap."""
+        quotas = [5, 0, 0, 0]  # Quota for bin 0-0.2
+        samples, report = generate_stratified_samples_rejection(
+            fire_names=["caldor"],
+            target_quotas=quotas,
+            max_attempts=3,
+            base_seed=2000,
+            tile_size=(64, 64),
+            source_mode="teacher_v1_cellular",
+        )
+        assert report.cap_reached is True
+        assert len(report.unfilled_messages) > 0
+        assert "could not be filled within the cap" in report.unfilled_messages[0]
+        assert "0-0.2" in report.unfilled_messages[0]
+
+    def test_shard_metadata_csv_export_and_diagnostics(self) -> None:
+        """Requirement 4: Shard metadata CSV export and CSV-based diagnostics."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            shards_dir = Path(tmp_dir)
+            samples = [
+                _create_dummy_sample("s_1", burned_fraction=0.15, seed=1),
+                _create_dummy_sample("s_2", burned_fraction=0.45, seed=2),
+                _create_dummy_sample("s_3", burned_fraction=0.75, seed=3),
+            ]
+            df_meta = save_shard_with_metadata(samples, shard_id="shard_000", shards_dir=shards_dir)
+
+            assert (shards_dir / "shard_000.pkl").exists()
+            assert (shards_dir / "shard_000_metadata.csv").exists()
+
+            # Verify columns
+            expected_cols = {
+                "fire",
+                "source",
+                "seed",
+                "peak_wind",
+                "burned_fraction",
+                "censored_fraction",
+                "bin",
+                "shard_id",
+                "sample_id",
+            }
+            assert expected_cols.issubset(set(df_meta.columns))
+            assert len(df_meta) == 3
+
+            # Verify CSV diagnostics without loading pickles
+            wind_md = compute_wind_distribution_table(df_meta)
+            assert (
+                "| Wind Speed Range (m/s) | Sample Count | Percentage | Mean Speed (m/s) | Min Speed (m/s) | Max Speed (m/s) |"
+                in wind_md
+            )
+
+            bf_wind_md = compute_burned_fraction_by_wind_bin(df_meta)
+            assert (
+                "| Wind Speed Range (m/s) | Sample Count | Mean Burned % | Std Burned % | Min Burned % | Max Burned % |"
+                in bf_wind_md
+            )
 
 
 class TestPhase2CAdapterAndMissRates:

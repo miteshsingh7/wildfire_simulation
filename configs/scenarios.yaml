@@ -67,6 +67,17 @@ stratified_sampling:
     bin_0_5_0_9: [0.5, 0.9]
     bin_above_0_9: [0.9, 1.0]
   target_proportions: [0.25, 0.25, 0.25, 0.25]
+  bin_quotas:
+    bin_0_0_2: 250
+    bin_0_2_0_5: 250
+    bin_0_5_0_9: 250
+    bin_above_0_9: 250
+  max_rejection_attempts: 2000
+
+dataset:
+  full_samples_total: 1000
+  smoke_samples_total: 100
+  samples_per_shard: 100
 
 storage:
   arrival_scale_factor: 10.0          # uint16 tenths-of-a-minute precision (0.1 min = 6 s)

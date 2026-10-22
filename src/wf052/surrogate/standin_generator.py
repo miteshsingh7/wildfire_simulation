@@ -15,6 +15,7 @@ import hashlib
 import heapq
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -348,6 +349,429 @@ def format_stratification_report(hist_before: dict[str, Any], hist_after: dict[s
     ):
         lines.append(f"| `{lbl}` | {b_cnt} | {b_pct:.1f}% | {a_cnt} | {a_pct:.1f}% |")
     return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class BinRejectionStats:
+    """Statistics for a single burned-fraction bin during rejection sampling."""
+
+    bin_name: str
+    bin_range: tuple[float, float]
+    target: int
+    generated: int
+    rejected: int
+    unique_count: int
+    filled: bool
+
+
+@dataclass(frozen=True)
+class RejectionSamplingReport:
+    """Comprehensive report across all bins from rejection sampling."""
+
+    stats: list[BinRejectionStats]
+    total_generated: int
+    total_accepted: int
+    total_rejected: int
+    max_attempts: int
+    cap_reached: bool
+    unfilled_messages: list[str]
+
+    def to_markdown(self) -> str:
+        """Format report as a clean markdown table."""
+        lines = [
+            "| Bin | Range | Target Quota | Generated | Rejected | Unique Count | Status |",
+            "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ]
+        for s in self.stats:
+            status_str = "**Filled**" if s.filled else f"**Unfilled** (deficit: {s.target - s.unique_count})"
+            lines.append(
+                f"| `{s.bin_name}` | `[{s.bin_range[0]}, {s.bin_range[1]})` | {s.target} | {s.generated} | {s.rejected} | {s.unique_count} | {status_str} |"
+            )
+        if self.unfilled_messages:
+            lines.append("")
+            for msg in self.unfilled_messages:
+                lines.append(f"> [!WARNING] {msg}")
+        return "\n".join(lines)
+
+
+def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str, Any]:
+    """Extract CSV metadata row for a single sample.
+
+    Fields:
+    - fire: fire name
+    - source: generator source (e.g. teacher_v1_cellular)
+    - seed: random seed
+    - peak_wind: peak sustained wind speed in m/s across the 12h series
+    - burned_fraction: fraction of cells where arrival < inf (censor_mask < 0.5)
+    - censored_fraction: fraction of cells unburned (censor_mask >= 0.5)
+    - bin: stratification bin index in 0..3
+    - shard_id: identifier of the enclosing shard
+    - sample_id: unique sample ID
+    """
+    speeds = np.hypot(sample.hourly_wind_uv[:, 0], sample.hourly_wind_uv[:, 1])
+    peak_wind = float(np.max(speeds))
+    burned_frac = float(np.mean(sample.censor_mask < 0.5))
+    censored_frac = float(np.mean(sample.censor_mask >= 0.5))
+    bin_idx = assign_burn_fraction_bin(burned_frac)
+
+    return {
+        "fire": sample.fire_name,
+        "source": sample.source,
+        "seed": int(sample.seed),
+        "peak_wind": round(peak_wind, 3),
+        "burned_fraction": round(burned_frac, 4),
+        "censored_fraction": round(censored_frac, 4),
+        "bin": bin_idx,
+        "shard_id": shard_id,
+        "sample_id": sample.sample_id,
+    }
+
+
+def save_shard_with_metadata(
+    samples: Sequence[SurrogateSample],
+    shard_id: str,
+    shards_dir: Path,
+) -> pd.DataFrame:
+    """Save sample objects to a pickle file and metadata to a CSV file.
+
+    Creates:
+    - shards_dir / f"{shard_id}.pkl"
+    - shards_dir / f"{shard_id}_metadata.csv"
+
+    Returns:
+    - pd.DataFrame containing the metadata rows.
+    """
+    import pickle
+
+    shards_dir = Path(shards_dir)
+    shards_dir.mkdir(parents=True, exist_ok=True)
+
+    pkl_path = shards_dir / f"{shard_id}.pkl"
+    tmp_pkl = shards_dir / f"tmp_{shard_id}.pkl"
+    with open(tmp_pkl, "wb") as f:
+        pickle.dump(list(samples), f, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp_pkl.rename(pkl_path)
+
+    rows = [sample_to_metadata_dict(s, shard_id) for s in samples]
+    df = pd.DataFrame(rows)
+    csv_path = shards_dir / f"{shard_id}_metadata.csv"
+    df.to_csv(csv_path, index=False)
+
+    return df
+
+
+def compute_wind_distribution_table(
+    df_meta: pd.DataFrame,
+    speed_bins: Sequence[tuple[float, float]] = (
+        (1.0, 5.0),
+        (5.0, 10.0),
+        (10.0, 15.0),
+        (15.0, 20.0),
+    ),
+) -> str:
+    """Compute wind speed distribution table from metadata CSV DataFrame."""
+    total = len(df_meta)
+    lines = [
+        "| Wind Speed Range (m/s) | Sample Count | Percentage | Mean Speed (m/s) | Min Speed (m/s) | Max Speed (m/s) |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    if total == 0:
+        return "\n".join(lines)
+
+    for lo, hi in speed_bins:
+        sub = df_meta[
+            (df_meta["peak_wind"] >= lo)
+            & (df_meta["peak_wind"] < hi if hi < 20.0 else df_meta["peak_wind"] <= hi)
+        ]
+        cnt = len(sub)
+        pct = (cnt / total) * 100.0 if total > 0 else 0.0
+        mean_spd = float(sub["peak_wind"].mean()) if cnt > 0 else 0.0
+        min_spd = float(sub["peak_wind"].min()) if cnt > 0 else 0.0
+        max_spd = float(sub["peak_wind"].max()) if cnt > 0 else 0.0
+        lines.append(
+            f"| `[{lo:.1f}, {hi:.1f}]` | {cnt} | {pct:.1f}% | {mean_spd:.2f} | {min_spd:.2f} | {max_spd:.2f} |"
+        )
+    return "\n".join(lines)
+
+
+def compute_burned_fraction_by_wind_bin(
+    df_meta: pd.DataFrame,
+    speed_bins: Sequence[tuple[float, float]] = (
+        (1.0, 5.0),
+        (5.0, 10.0),
+        (10.0, 15.0),
+        (15.0, 20.0),
+    ),
+) -> str:
+    """Compute burned fraction statistics grouped by wind speed bins from metadata CSV DataFrame."""
+    lines = [
+        "| Wind Speed Range (m/s) | Sample Count | Mean Burned % | Std Burned % | Min Burned % | Max Burned % |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    if len(df_meta) == 0:
+        return "\n".join(lines)
+
+    for lo, hi in speed_bins:
+        sub = df_meta[
+            (df_meta["peak_wind"] >= lo)
+            & (df_meta["peak_wind"] < hi if hi < 20.0 else df_meta["peak_wind"] <= hi)
+        ]
+        cnt = len(sub)
+        if cnt > 0:
+            mean_bf = float(sub["burned_fraction"].mean()) * 100.0
+            std_bf = float(sub["burned_fraction"].std()) * 100.0 if cnt > 1 else 0.0
+            min_bf = float(sub["burned_fraction"].min()) * 100.0
+            max_bf = float(sub["burned_fraction"].max()) * 100.0
+            lines.append(
+                f"| `[{lo:.1f}, {hi:.1f}]` | {cnt} | {mean_bf:.1f}% | {std_bf:.1f}% | {min_bf:.1f}% | {max_bf:.1f}% |"
+            )
+        else:
+            lines.append(f"| `[{lo:.1f}, {hi:.1f}]` | 0 | N/A | N/A | N/A | N/A |")
+    return "\n".join(lines)
+
+
+def generate_stratified_samples_rejection(
+    fire_names: Sequence[str] | None = None,
+    target_quotas: dict[str | int, int] | Sequence[int] | None = None,
+    total_samples: int | None = None,
+    max_attempts: int | None = None,
+    base_seed: int = 42000,
+    tile_size: tuple[int, int] = (256, 256),
+    source_mode: str = "teacher_v1_cellular",
+    horizon_min: float = 720.0,
+    scenarios_config_path: str | Path = "configs/scenarios.yaml",
+) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
+    """Generate training samples using rejection sampling against burned-fraction bin quotas.
+
+    Each burned-fraction bin has a quota. The generator keeps sampling candidates with unique
+    seeds until every bin is full or max_attempts is reached. Never duplicates a sample.
+
+    Bins:
+    - 0: [0.0, 0.2)
+    - 1: [0.2, 0.5)
+    - 2: [0.5, 0.9)
+    - 3: [0.9, 1.0]
+
+    Returns:
+        (accepted_samples, rejection_report)
+    """
+    if fire_names is None:
+        fire_names = SEVEN_TRAINING_FIRES
+
+    cfg = load_held_out_fire_exclusions(scenarios_config_path)
+    strat_cfg = cfg.get("stratified_sampling", {})
+
+    # Determine bin quotas [q0, q1, q2, q3]
+    bin_names = ["0-0.2", "0.2-0.5", "0.5-0.9", ">0.9"]
+    bin_ranges = [(0.0, 0.2), (0.2, 0.5), (0.5, 0.9), (0.9, 1.0)]
+
+    quotas = [0, 0, 0, 0]
+    if target_quotas is not None:
+        if isinstance(target_quotas, Sequence):
+            quotas = [int(q) for q in target_quotas[:4]]
+        elif isinstance(target_quotas, dict):
+            key_map = {
+                0: 0,
+                1: 1,
+                2: 2,
+                3: 3,
+                "0": 0,
+                "1": 1,
+                "2": 2,
+                "3": 3,
+                "bin_0_0_2": 0,
+                "bin_0_2_0_5": 1,
+                "bin_0_5_0_9": 2,
+                "bin_above_0_9": 3,
+                "0-0.2": 0,
+                "0.2-0.5": 1,
+                "0.5-0.9": 2,
+                ">0.9": 3,
+            }
+            for k, val in target_quotas.items():
+                if k in key_map:
+                    quotas[key_map[k]] = int(val)
+    elif total_samples is not None:
+        props = strat_cfg.get("target_proportions", [0.25, 0.25, 0.25, 0.25])
+        quotas = [int(round(total_samples * p)) for p in props]
+    else:
+        cfg_quotas = strat_cfg.get("bin_quotas", {})
+        quotas = [
+            int(cfg_quotas.get("bin_0_0_2", 25)),
+            int(cfg_quotas.get("bin_0_2_0_5", 25)),
+            int(cfg_quotas.get("bin_0_5_0_9", 25)),
+            int(cfg_quotas.get("bin_above_0_9", 25)),
+        ]
+
+    if max_attempts is None:
+        max_attempts = int(strat_cfg.get("max_rejection_attempts", 2000))
+
+    cfg_hash = get_teacher_config_hash()
+
+    # Preload and cache rasters for training fires
+    cached_fires: list[dict[str, Any]] = []
+    for fire in fire_names:
+        verify_fire_not_excluded(fire, scenarios_config_path)
+        fbfm_base, elev_base, canopy_base, _ = load_fire_rasters_crop(
+            fire_name=fire,
+            tile_size=tile_size,
+            scenarios_config_path=scenarios_config_path,
+        )
+        fuel_grp = fbfm40_to_fuel_group(fbfm_base)
+        slope, asp_sin, asp_cos = compute_slope_aspect(elev_base, resolution_m=60.0)
+        elev_z = ((elev_base - np.mean(elev_base)) / (np.std(elev_base) + 1e-5)).astype(np.float32)
+
+        cached_fires.append(
+            {
+                "fire": fire,
+                "fuel_grp": fuel_grp,
+                "slope": slope,
+                "asp_sin": asp_sin,
+                "asp_cos": asp_cos,
+                "elev_z": elev_z,
+                "canopy": canopy_base,
+                "fire_dir": Path("data/tiles/fires") / fire,
+            }
+        )
+
+    accepted_samples: list[SurrogateSample] = []
+    bin_accepted: list[list[SurrogateSample]] = [[], [], [], []]
+    bin_generated: list[int] = [0, 0, 0, 0]
+    bin_rejected: list[int] = [0, 0, 0, 0]
+
+    for attempt in range(max_attempts):
+        if all(len(bin_accepted[b]) >= quotas[b] for b in range(4) if quotas[b] > 0):
+            break
+
+        f_idx = attempt % len(cached_fires)
+        f_info = cached_fires[f_idx]
+        fire = f_info["fire"]
+
+        seed = base_seed + attempt * 17
+        rng = np.random.RandomState(seed)
+
+        wind_base = sample_hrrr_wind_series(
+            fire_dir=f_info["fire_dir"],
+            rng=rng,
+            window_hours=12,
+            target_peak_speed_range=(1.0, 20.0),
+        )
+
+        # Perturbations
+        spd_mult = float(rng.uniform(0.90, 1.10))
+        dir_jitter_deg = float(rng.uniform(-20.0, 20.0))
+        ign_offset_r = int(rng.randint(-10, 11))
+        ign_offset_c = int(rng.randint(-10, 11))
+
+        jitter_rad = np.deg2rad(dir_jitter_deg)
+        cos_j, sin_j = np.cos(jitter_rad), np.sin(jitter_rad)
+        u_j = (wind_base[:, 0] * cos_j - wind_base[:, 1] * sin_j) * spd_mult
+        v_j = (wind_base[:, 0] * sin_j + wind_base[:, 1] * cos_j) * spd_mult
+        hourly_wind_perturbed = np.stack([u_j, v_j], axis=-1).astype(np.float32)
+
+        ign_r, ign_c = calculate_upwind_third_ignition(
+            hourly_wind_uv=hourly_wind_perturbed,
+            tile_shape=tile_size,
+            offset_r=ign_offset_r,
+            offset_c=ign_offset_c,
+        )
+
+        ign_mask = np.zeros(tile_size, dtype=np.float32)
+        r_lo, r_hi = max(0, ign_r - 1), min(tile_size[0], ign_r + 2)
+        c_lo, c_hi = max(0, ign_c - 1), min(tile_size[1], ign_c + 2)
+        ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
+
+        if source_mode == "teacher_v1_cellular":
+            arr_time, c_mask = simulate_cellular_standin_arrival(
+                fuel_group=f_info["fuel_grp"],
+                hourly_wind_uv=hourly_wind_perturbed,
+                ign_r=ign_r,
+                ign_c=ign_c,
+                resolution_m=60.0,
+                horizon_min=horizon_min,
+                speed_multiplier=spd_mult,
+            )
+        else:
+            lb_jitter = float(rng.uniform(-0.3, 0.3))
+            arr_time, c_mask = generate_analytic_arrival_surface(
+                fuel_group=f_info["fuel_grp"],
+                hourly_wind_uv=hourly_wind_perturbed,
+                ign_r=ign_r,
+                ign_c=ign_c,
+                resolution_m=60.0,
+                horizon_min=horizon_min,
+                speed_multiplier=spd_mult,
+                length_to_breadth=2.5 + lb_jitter,
+            )
+
+        bf = float(np.mean(c_mask < 0.5))
+        bin_idx = assign_burn_fraction_bin(bf)
+        bin_generated[bin_idx] += 1
+
+        if len(bin_accepted[bin_idx]) < quotas[bin_idx]:
+            sample_id = f"{fire}_member_{len(accepted_samples):04d}_{source_mode}"
+            scaffold_tag = f"scaffold_{cfg_hash[:12]}"
+            sample = SurrogateSample(
+                fire_name=fire,
+                sample_id=sample_id,
+                fuel_group=f_info["fuel_grp"],
+                slope=f_info["slope"],
+                aspect_sin=f_info["asp_sin"],
+                aspect_cos=f_info["asp_cos"],
+                elevation_z=f_info["elev_z"],
+                canopy_cover=f_info["canopy"],
+                ignition_mask=ign_mask,
+                hourly_wind_uv=hourly_wind_perturbed,
+                target_arrival_time=arr_time,
+                censor_mask=c_mask,
+                scaffold_tag=scaffold_tag,
+                seed=seed,
+                source=source_mode,
+                baseline_only=(source_mode == "analytic_wind_ellipse"),
+            )
+            bin_accepted[bin_idx].append(sample)
+            accepted_samples.append(sample)
+        else:
+            bin_rejected[bin_idx] += 1
+
+    stats: list[BinRejectionStats] = []
+    unfilled_messages: list[str] = []
+    for b in range(4):
+        target = quotas[b]
+        unique_cnt = len(bin_accepted[b])
+        gen = bin_generated[b]
+        rej = bin_rejected[b]
+        filled = unique_cnt >= target
+        if not filled and target > 0:
+            msg = (
+                f"Bin '{bin_names[b]}' could not be filled within the cap of {max_attempts} attempts "
+                f"(target: {target}, generated in bin: {gen}, reached: {unique_cnt}, deficit: {target - unique_cnt})."
+            )
+            unfilled_messages.append(msg)
+            logger.warning(msg)
+        stats.append(
+            BinRejectionStats(
+                bin_name=bin_names[b],
+                bin_range=bin_ranges[b],
+                target=target,
+                generated=gen,
+                rejected=rej,
+                unique_count=unique_cnt,
+                filled=filled,
+            )
+        )
+
+    report = RejectionSamplingReport(
+        stats=stats,
+        total_generated=sum(bin_generated),
+        total_accepted=len(accepted_samples),
+        total_rejected=sum(bin_rejected),
+        max_attempts=max_attempts,
+        cap_reached=any(not s.filled for s in stats if s.target > 0),
+        unfilled_messages=unfilled_messages,
+    )
+
+    return accepted_samples, report
 
 
 def generate_analytic_arrival_surface(
