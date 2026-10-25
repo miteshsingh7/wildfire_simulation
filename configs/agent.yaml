@@ -1,13 +1,17 @@
-# Agent Configuration (Phase 5A)
+# Agent Configuration (Phase 5B)
 agent:
-  buffer_minutes: 15.0                 # Minimum required safety buffer B (minutes)
-  arrival_field_change_threshold: 15.0 # Mean difference (min) across active area to trigger re-plan
-  hysteresis_margin_min: 5.0           # Margin improvement required to switch route (minutes)
-  hysteresis_time_pct: 0.10            # Travel time improvement required to switch route (10%)
+  buffer_minutes: 15.0                     # Minimum required safety buffer B (minutes)
+  conservative_buffer_minutes: 30.0        # Buffer applied under low-confidence / conservative replan
+  arrival_field_change_threshold: 15.0     # Mean difference (min) across active area to trigger re-plan
+  max_active_edge_change_threshold: 15.0   # Max arrival change (min) over edges on active routes
+  hysteresis_margin_min: 5.0               # Margin improvement required to switch route (minutes)
+  hysteresis_time_pct: 0.10                # Travel time improvement required to switch route (10%)
   log_file: "output/agent_run_log.jsonl"
+  provider: "mock"                         # LLM provider: mock | openai | anthropic | gemini
 
 confidence:
-  min_spread_area_cells: 5             # If burned cells <= 5, flag low confidence (no spread beyond ignition)
+  min_spread_area_cells: 5                 # If burned cells <= 5, flag low confidence (minimal spread)
+  observation_tolerance_minutes: 15.0      # Max minutes detection can arrive earlier than q10
 
 brief:
   standing_caveat: >-
@@ -15,6 +19,6 @@ brief:
     or unmodeled secondary ignitions; areas outside the predicted fire perimeter are not
     guaranteed safe.
   low_confidence_notice: >-
-    ALERT: Arrival field is flagged LOW CONFIDENCE (fire model shows no significant spread
-    beyond the ignition zone). Field observations or sensor coverage may be incomplete.
-  qualitative_clearance: true          # Enforce qualitative-only clearance descriptions (no hours)
+    ALERT: Arrival field is flagged LOW CONFIDENCE (fire model shows minimal spread or contradicts
+    field observations). Field observations or sensor coverage may be incomplete.
+  qualitative_clearance: true              # Enforce qualitative-only clearance descriptions (no hours)

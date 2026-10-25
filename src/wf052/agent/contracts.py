@@ -29,6 +29,21 @@ class WeatherReport:
 
 
 @dataclass(frozen=True)
+class ObservationConsistencyResult:
+    """Result of checking an arrival field against field observations (e.g. NIST points)."""
+
+    is_consistent: bool
+    is_low_confidence: bool
+    reason: str
+    earlier_detections_count: int
+    unmodeled_detections_count: int
+    total_detections: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ArrivalFieldMeta:
     """Metadata regarding arrival field spread extent and confidence."""
 
@@ -37,6 +52,7 @@ class ArrivalFieldMeta:
     total_cells: int
     min_arrival_min: float
     reason: str = ""
+    observation_consistency: ObservationConsistencyResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -110,6 +126,10 @@ class AgentState(TypedDict, total=False):
     weather: WeatherReport
     arrival_field: ArrivalField
     arrival_field_meta: ArrivalFieldMeta
+    detections: Any
+    use_conservative_settings: bool
+    conservative_buffer_minutes: float
+    stage_latencies: dict[str, float]
 
     # Route and validation state
     current_routes: dict[int, EvacuationRoute]

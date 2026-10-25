@@ -48,6 +48,45 @@ def evaluate_arrival_field_difference(
     return float(np.mean(diff))
 
 
+def compute_max_active_edge_change(
+    current_routes: dict[int, EvacuationRoute] | None,
+    previous_arrival_field: ArrivalField | None,
+    new_arrival_field: ArrivalField,
+    road_graph: RoadGraph | None,
+    horizon_minutes: float = 720.0,
+) -> float:
+    """Compute maximum absolute fire arrival change over all edges on active routes.
+
+    Returns:
+        Max difference in minutes (0.0 if not evaluable).
+    """
+    if not current_routes or previous_arrival_field is None or road_graph is None:
+        return 0.0
+
+    prev_arrivals = road_graph.compute_edge_fire_arrivals(previous_arrival_field)
+    new_arrivals = road_graph.compute_edge_fire_arrivals(new_arrival_field)
+
+    max_diff = 0.0
+    active_edge_pairs: set[tuple[int, int]] = set()
+    for r in current_routes.values():
+        for e in r.edges:
+            active_edge_pairs.add((e.u, e.v))
+
+    for idx, ge in enumerate(road_graph.edges):
+        if (ge.u, ge.v) in active_edge_pairs or (ge.v, ge.u) in active_edge_pairs:
+            t_prev = float(prev_arrivals[idx])
+            t_new = float(new_arrivals[idx])
+            if not np.isfinite(t_prev) and not np.isfinite(t_new):
+                continue
+            t_p = t_prev if np.isfinite(t_prev) else horizon_minutes
+            t_n = t_new if np.isfinite(t_new) else horizon_minutes
+            diff = abs(t_n - t_p)
+            if diff > max_diff:
+                max_diff = diff
+
+    return float(max_diff)
+
+
 def reevaluate_route_margin(
     route: EvacuationRoute,
     new_arrival_field: ArrivalField,
@@ -78,11 +117,13 @@ class ReplanPolicy:
         self,
         buffer_minutes: float = 15.0,
         arrival_field_change_threshold: float = 15.0,
+        max_active_edge_change_threshold: float = 15.0,
         hysteresis_margin_min: float = 5.0,
         hysteresis_time_pct: float = 0.10,
     ) -> None:
         self.buffer_minutes = buffer_minutes
         self.arrival_field_change_threshold = arrival_field_change_threshold
+        self.max_active_edge_change_threshold = max_active_edge_change_threshold
         self.hysteresis_margin_min = hysteresis_margin_min
         self.hysteresis_time_pct = hysteresis_time_pct
 
@@ -94,6 +135,7 @@ class ReplanPolicy:
         new_arrival_field: ArrivalField,
         road_cut_edges: set[tuple[int, int]] | None = None,
         road_graph: RoadGraph | None = None,
+        low_confidence_triggered: bool = False,
     ) -> tuple[dict[int, EvacuationRoute], ReplanDecision]:
         """Evaluate re-plan criteria across all origins with anti-flapping hysteresis.
 
@@ -104,6 +146,7 @@ class ReplanPolicy:
             new_arrival_field: Updated ArrivalField from current update.
             road_cut_edges: Optional set of newly severed (u, v) edges.
             road_graph: Road graph for evaluating current route against new fire field.
+            low_confidence_triggered: Flag if arrival field confidence check failed.
 
         Returns:
             (active_routes, ReplanDecision)
@@ -118,20 +161,40 @@ class ReplanPolicy:
             )
 
         road_cuts = road_cut_edges or set()
+        reasons: list[str] = []
+
+        # Trigger 1: Maximum arrival change over edges on active routes
+        max_edge_shift = compute_max_active_edge_change(
+            current_routes=current_routes,
+            previous_arrival_field=previous_arrival_field,
+            new_arrival_field=new_arrival_field,
+            road_graph=road_graph,
+        )
+        edge_shift_triggered = max_edge_shift >= self.max_active_edge_change_threshold
+        if edge_shift_triggered:
+            reasons.append(
+                f"Max arrival change on active route edges ({max_edge_shift:.1f} min) "
+                f">= {self.max_active_edge_change_threshold:.1f} min threshold."
+            )
+
+        # Trigger 2: Domain mean arrival field shift
         field_shift = evaluate_arrival_field_difference(
             previous_arrival_field, new_arrival_field
         )
-        field_changed_significantly = field_shift >= self.arrival_field_change_threshold
+        field_shift_triggered = field_shift >= self.arrival_field_change_threshold
+        if field_shift_triggered:
+            reasons.append(
+                f"Domain mean arrival field shifted by {field_shift:.1f} min "
+                f">= {self.arrival_field_change_threshold:.1f} min threshold."
+            )
+
+        # Trigger 3: Low confidence observation/spread inconsistency
+        if low_confidence_triggered:
+            reasons.append("Low confidence arrival field triggered conservative re-plan.")
 
         active_routes: dict[int, EvacuationRoute] = {}
         changed_origins: list[int] = []
         flap_prevented_origins: list[int] = []
-        reasons: list[str] = []
-
-        if field_changed_significantly:
-            reasons.append(
-                f"Arrival field shifted by {field_shift:.1f} min >= {self.arrival_field_change_threshold:.1f} min threshold."
-            )
 
         for orig, cand_route in candidate_routes.items():
             curr_route = current_routes.get(orig)
@@ -192,7 +255,12 @@ class ReplanPolicy:
                     active_routes[orig] = curr_route
                     flap_prevented_origins.append(orig)
 
-        needs_replan = len(changed_origins) > 0 or field_changed_significantly
+        needs_replan = (
+            len(changed_origins) > 0
+            or edge_shift_triggered
+            or field_shift_triggered
+            or low_confidence_triggered
+        )
         combined_reason = (
             " | ".join(sorted(set(reasons)))
             if reasons

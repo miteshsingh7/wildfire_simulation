@@ -88,24 +88,28 @@ class EvacuationAgent:
     def _node_get_arrival_field(self, state: AgentState) -> dict[str, Any]:
         update_id = state.get("update_id", "UPDATE_001")
         custom_field = state.get("arrival_field")
+        detections = state.get("detections")
 
         arr_field, meta = get_arrival_field(
             mode=state.get("arrival_field_mode", "synthetic"),
             config=state.get("arrival_field_config"),
             road_graph=state.get("road_graph"),
             custom_field=custom_field,
+            detections=detections,
+            observation_tolerance_minutes=state.get("observation_tolerance_minutes", 15.0),
         )
 
         outputs = {
             "arrival_field": arr_field,
             "arrival_field_meta": meta,
+            "use_conservative_settings": meta.is_low_confidence,
         }
         log_step_event(
             log_file=state.get("log_file", self.log_file),
             step_name="get_arrival_field",
             update_id=update_id,
-            inputs={"mode": state.get("arrival_field_mode", "synthetic")},
-            outputs={"meta": meta.to_dict()},
+            inputs={"mode": state.get("arrival_field_mode", "synthetic"), "has_detections": detections is not None},
+            outputs={"meta": meta.to_dict(), "use_conservative_settings": meta.is_low_confidence},
         )
         return outputs
 
@@ -116,6 +120,8 @@ class EvacuationAgent:
         destinations = state.get("destinations", [])
         departure_time = state.get("departure_time", 0.0)
         buffer_minutes = state.get("buffer_minutes", 15.0)
+        conservative_mode = bool(state.get("use_conservative_settings", False))
+        conservative_buffer = float(state.get("conservative_buffer_minutes", 30.0))
         arrival_field = state["arrival_field"]
 
         planned = plan_routes(
@@ -125,6 +131,8 @@ class EvacuationAgent:
             departure_time=departure_time,
             arrival_field=arrival_field,
             buffer_minutes=buffer_minutes,
+            conservative_mode=conservative_mode,
+            conservative_buffer_minutes=conservative_buffer,
         )
 
         outputs = {"planned_routes": planned}
@@ -132,7 +140,12 @@ class EvacuationAgent:
             log_file=state.get("log_file", self.log_file),
             step_name="plan_routes",
             update_id=update_id,
-            inputs={"origins": origins, "destinations": destinations, "departure_time": departure_time},
+            inputs={
+                "origins": origins,
+                "destinations": destinations,
+                "departure_time": departure_time,
+                "conservative_mode": conservative_mode,
+            },
             outputs={"planned_routes_count": len(planned)},
         )
         return outputs
@@ -206,6 +219,9 @@ class EvacuationAgent:
         curr_field = state["arrival_field"]
         road_cuts = state.get("road_cut_edges")
 
+        meta = state.get("arrival_field_meta")
+        is_low_conf = meta.is_low_confidence if meta else False
+
         active_routes, decision = self.policy.decide(
             current_routes=current_routes,
             candidate_routes=planned_routes,
@@ -213,6 +229,7 @@ class EvacuationAgent:
             new_arrival_field=curr_field,
             road_cut_edges=road_cuts,
             road_graph=state.get("road_graph"),
+            low_confidence_triggered=is_low_conf,
         )
 
         outputs = {

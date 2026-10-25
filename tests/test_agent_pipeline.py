@@ -19,11 +19,14 @@ Tests:
 """
 
 import json
+import os
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
+import httpx
 import numpy as np
 import pytest
 import shapely.geometry
@@ -38,12 +41,16 @@ from wf052.agent.graph import EvacuationAgent
 from wf052.agent.grounding import GroundingChecker
 from wf052.agent.llm import (
     LOW_CONFIDENCE_NOTICE,
+    NO_SAFE_ROUTE_ANY_NOTICE,
     STANDING_CAVEAT,
     DeterministicBriefGenerator,
     MockLLMClient,
+    ProviderLLMClient,
+    create_llm_client,
 )
-from wf052.agent.policy import ReplanPolicy
+from wf052.agent.policy import ReplanPolicy, compute_max_active_edge_change
 from wf052.agent.tools import (
+    check_field_vs_observations,
     compute_exposure,
     compute_k_star,
     get_arrival_field,
@@ -56,6 +63,7 @@ from wf052.routing.graph import RoadGraph
 from wf052.routing.synthetic_fire import (
     create_expanding_circle_arrival_field,
     create_unburned_arrival_field,
+    create_wind_ellipse_arrival_field,
 )
 
 
@@ -663,39 +671,641 @@ class TestBriefsAndGrounding:
         assert rejects == 5
 
 
-class TestPerformanceAndBenchmarks:
-    """Requirement 5 & 6: Latency benchmarks and grounding stats."""
+class TestPhase5BFullGraphBenchmark:
+    """Requirement 1: Full-graph run on real Camp Fire road graph vs small unit-test timings."""
 
-    def test_latency_router_validator_vs_llm(self, synthetic_diamond_graph: RoadGraph) -> None:
-        """Requirement 6: Router + validator latency per update vs LLM step with mock."""
+    def test_full_camp_fire_graph_latency(
+        self, camp_fire_graph: RoadGraph, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        """Run agent end to end on real Camp Fire road graph (11,814 edges, 5,110 nodes).
+
+        Report latency per stage (router, validator, exposure) as median and p95 over 20 runs.
+        Keep small-graph numbers separate and labelled as unit-test timings.
+        """
+        assert camp_fire_graph.grid_x is not None and camp_fire_graph.grid_y is not None
+        arr_field = create_wind_ellipse_arrival_field(
+            x_coords=camp_fire_graph.grid_x,
+            y_coords=camp_fire_graph.grid_y,
+            ignition_x=633391.0,
+            ignition_y=4407338.0,
+            head_rate_m_per_min=35.0,
+            back_rate_m_per_min=5.0,
+            length_to_breadth=2.5,
+            wind_towards_deg=240.0,
+            horizon_minutes=720.0,
+        )
+
+        test_origins = [
+            camp_fire_graph.named_origins["Paradise"],
+            camp_fire_graph.named_origins["Magalia"],
+            camp_fire_graph.named_origins["Concow"],
+        ]
+        test_dests = list(camp_fire_graph.boundary_destinations.values())
+
+        # 1. Benchmark 20 runs on Real Camp Fire Road Graph
+        router_times_full = []
+        validator_times_full = []
+        exposure_times_full = []
+
+        for _ in range(20):
+            t0 = time.perf_counter()
+            routes = plan_routes(
+                camp_fire_graph, test_origins, test_dests, 60.0, arr_field, buffer_minutes=15.0
+            )
+            t1 = time.perf_counter()
+            _ = validate_routes(camp_fire_graph, routes, arr_field, buffer_minutes=15.0)
+            t2 = time.perf_counter()
+            _ = compute_exposure(routes, camp_fire_graph, buffer_minutes=15.0)
+            t3 = time.perf_counter()
+
+            router_times_full.append((t1 - t0) * 1000.0)
+            validator_times_full.append((t2 - t1) * 1000.0)
+            exposure_times_full.append((t3 - t2) * 1000.0)
+
+        # 2. Benchmark 20 runs on Small Synthetic Diamond Graph (Unit Test Timings)
+        router_times_small = []
+        validator_times_small = []
+        exposure_times_small = []
+        assert synthetic_diamond_graph.grid_x is not None and synthetic_diamond_graph.grid_y is not None
+        arr_small = create_unburned_arrival_field(synthetic_diamond_graph.grid_x, synthetic_diamond_graph.grid_y)
+
+        for _ in range(20):
+            t0 = time.perf_counter()
+            r_s = plan_routes(synthetic_diamond_graph, [0], [3], 0.0, arr_small, 15.0)
+            t1 = time.perf_counter()
+            _ = validate_routes(synthetic_diamond_graph, r_s, arr_small, 15.0)
+            t2 = time.perf_counter()
+            _ = compute_exposure(r_s, synthetic_diamond_graph, 15.0)
+            t3 = time.perf_counter()
+
+            router_times_small.append((t1 - t0) * 1000.0)
+            validator_times_small.append((t2 - t1) * 1000.0)
+            exposure_times_small.append((t3 - t2) * 1000.0)
+
+        med_r_f, p95_r_f = float(np.median(router_times_full)), float(np.percentile(router_times_full, 95))
+        med_v_f, p95_v_f = float(np.median(validator_times_full)), float(np.percentile(validator_times_full, 95))
+        med_e_f, p95_e_f = float(np.median(exposure_times_full)), float(np.percentile(exposure_times_full, 95))
+
+        med_r_s, p95_r_s = float(np.median(router_times_small)), float(np.percentile(router_times_small, 95))
+        med_v_s, p95_v_s = float(np.median(validator_times_small)), float(np.percentile(validator_times_small, 95))
+        med_e_s, p95_e_s = float(np.median(exposure_times_small)), float(np.percentile(exposure_times_small, 95))
+
+        print("\n" + "=" * 75)
+        print(f"[FULL GRAPH RUN] Real Camp Fire Road Graph ({len(camp_fire_graph.edges)} edges, {len(camp_fire_graph.nodes)} nodes):")
+        print(f"  Stage 1 (Router):    Median = {med_r_f:6.2f} ms | P95 = {p95_r_f:6.2f} ms")
+        print(f"  Stage 2 (Validator): Median = {med_v_f:6.2f} ms | P95 = {p95_v_f:6.2f} ms")
+        print(f"  Stage 3 (Exposure):  Median = {med_e_f:6.2f} ms | P95 = {p95_e_f:6.2f} ms")
+        print(f"  Total Pipeline:      Median = {med_r_f + med_v_f + med_e_f:6.2f} ms")
+        print("-" * 75)
+        print(f"[UNIT-TEST TIMINGS] Small Synthetic Diamond Graph ({len(synthetic_diamond_graph.edges)} edges, {len(synthetic_diamond_graph.nodes)} nodes):")
+        print(f"  Stage 1 (Router):    Median = {med_r_s:6.3f} ms | P95 = {p95_r_s:6.3f} ms")
+        print(f"  Stage 2 (Validator): Median = {med_v_s:6.3f} ms | P95 = {p95_v_s:6.3f} ms")
+        print(f"  Stage 3 (Exposure):  Median = {med_e_s:6.3f} ms | P95 = {p95_e_s:6.3f} ms")
+        print("=" * 75)
+
+        assert med_r_f < 500.0
+        assert med_v_f < 200.0
+        assert med_r_s < 20.0
+
+
+class TestPhase5BNoSafeRouteScenarios:
+    """Requirement 2: Scripted sequences for partial and complete no-safe-route scenarios."""
+
+    def test_no_safe_route_some_origins(self, synthetic_diamond_graph: RoadGraph) -> None:
+        """Scenario (a): No safe route exists for some origins (e.g. Origin 0), but safe for others."""
         graph = synthetic_diamond_graph
+        generator = DeterministicBriefGenerator()
+        checker = GroundingChecker()
+
+        r0 = EvacuationRoute(
+            origin_id=0,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=20.0,
+            total_travel_time_min=20.0,
+            min_margin_min=-5.0,
+            bottleneck_edge=(0, 1, 0),
+            edges=[],
+            node_ids=(0, 1, 3),
+            status=RouteStatus.BEST_EFFORT,
+            mode_used="max_min_margin",
+        )
+        r1 = EvacuationRoute(
+            origin_id=1,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=10.0,
+            total_travel_time_min=10.0,
+            min_margin_min=45.0,
+            bottleneck_edge=None,
+            edges=[],
+            node_ids=(1, 3),
+            status=RouteStatus.SAFE,
+            mode_used="fastest_safe",
+        )
+        routes = {0: r0, 1: r1}
+        exp = compute_exposure(routes, graph, buffer_minutes=15.0)
+
+        state: AgentState = {
+            "update_id": "PARTIAL_TRAP_001",
+            "active_routes": routes,
+            "exposure_summary": exp,
+            "road_graph": graph,
+            "origins": [0, 1],
+            "destinations": [3],
+            "buffer_minutes": 15.0,
+        }
+
+        brief = generator.build_brief(state)
+
+        assert "CRITICAL ALERT: NO SAFE EVACUATION ROUTE EXISTS FOR Zone 0" in brief
+        assert brief.find("NO SAFE EVACUATION ROUTE") < brief.find("Assigned Evacuation Corridors:")
+        assert "Zone 0 -> Exit 3: BEST-EFFORT" in brief
+
+        for line in brief.split("\n"):
+            if "Zone 0 -> Exit" in line:
+                assert "safe" not in line.lower()
+                assert "BEST-EFFORT" in line
+
+        check_res = checker.check(brief, state)
+        assert check_res.passed is True
+
+    def test_no_safe_route_all_origins(self, synthetic_diamond_graph: RoadGraph) -> None:
+        """Scenario (b): No safe route exists for any origin (complete entrapment)."""
+        graph = synthetic_diamond_graph
+        generator = DeterministicBriefGenerator()
+        checker = GroundingChecker()
+
+        r0 = EvacuationRoute(
+            origin_id=0,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=20.0,
+            total_travel_time_min=20.0,
+            min_margin_min=-10.0,
+            bottleneck_edge=(0, 1, 0),
+            edges=[],
+            node_ids=(0, 1, 3),
+            status=RouteStatus.BEST_EFFORT,
+            mode_used="max_min_margin",
+        )
+        routes = {0: r0}
+        exp = compute_exposure(routes, graph, buffer_minutes=15.0)
+
+        state: AgentState = {
+            "update_id": "ALL_TRAP_001",
+            "active_routes": routes,
+            "exposure_summary": exp,
+            "road_graph": graph,
+            "origins": [0],
+            "destinations": [3],
+            "buffer_minutes": 15.0,
+        }
+
+        brief = generator.build_brief(state)
+
+        assert brief.startswith(NO_SAFE_ROUTE_ANY_NOTICE)
+        assert "BEST-EFFORT only" in brief
+        assert "Zone 0 -> Exit 3: BEST-EFFORT" in brief
+
+        for line in brief.split("\n"):
+            if "Zone 0 -> Exit" in line:
+                assert "safe" not in line.lower()
+
+        check_res = checker.check(brief, state)
+        assert check_res.passed is True
+
+
+class TestPhase5BObservationConsistency:
+    """Requirement 3: Field vs observation consistency checking and conservative re-plan trigger."""
+
+    def test_detection_arrives_earlier_than_q10_flags_low_confidence(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr = create_expanding_circle_arrival_field(graph.grid_x, graph.grid_y, 0.0, 0.0, 10.0)
+        detections = [{"x": 500.0, "y": 500.0, "elapsed_minutes": 10.0}]
+
+        res = check_field_vs_observations(arr, detections, tolerance_minutes=15.0)
+        assert res.is_low_confidence is True
+        assert res.is_consistent is False
+        assert res.earlier_detections_count == 1
+        assert "arrived earlier than field q10" in res.reason
+
+    def test_detection_at_unmodeled_cell_flags_low_confidence(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr = create_expanding_circle_arrival_field(
+            graph.grid_x, graph.grid_y, -100.0, -100.0, 5.0, horizon_minutes=30.0
+        )
+        detections = [{"x": 1100.0, "y": 600.0, "elapsed_minutes": 20.0}]
+
+        res = check_field_vs_observations(arr, detections, tolerance_minutes=15.0)
+        assert res.is_low_confidence is True
+        assert res.unmodeled_detections_count == 1
+        assert "predicts no arrival / unmodeled" in res.reason
+
+    def test_consistent_detection_maintains_high_confidence(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr = create_expanding_circle_arrival_field(graph.grid_x, graph.grid_y, 0.0, 0.0, 10.0)
+        detections = [{"x": 500.0, "y": 0.0, "elapsed_minutes": 52.0}]
+
+        res = check_field_vs_observations(arr, detections, tolerance_minutes=15.0)
+        assert res.is_low_confidence is False
+        assert res.is_consistent is True
+        assert res.earlier_detections_count == 0
+        assert res.unmodeled_detections_count == 0
+
+    def test_observation_inconsistency_triggers_conservative_replan(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        agent = EvacuationAgent()
+
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr = create_expanding_circle_arrival_field(graph.grid_x, graph.grid_y, 0.0, 0.0, 10.0)
+        inconsistent_det = [{"x": 500.0, "y": 500.0, "elapsed_minutes": 10.0}]
+
+        # Establish current baseline routes so this update is evaluated as a re-plan
+        r_baseline = plan_routes(graph, [0], [3], 0.0, arr, 15.0)
+
+        state: AgentState = {
+            "update_id": "OBS_TEST_001",
+            "road_graph": graph,
+            "origins": [0],
+            "destinations": [3],
+            "departure_time": 0.0,
+            "buffer_minutes": 15.0,
+            "arrival_field": arr,
+            "current_routes": r_baseline,
+            "detections": inconsistent_det,
+            "conservative_buffer_minutes": 30.0,
+        }
+
+        res = agent.run_update(state)
+        assert res["arrival_field_meta"].is_low_confidence is True
+        assert res["use_conservative_settings"] is True
+        assert res["replan_decision"].needs_replan is True
+        assert "Low confidence" in res["replan_decision"].reason
+        assert LOW_CONFIDENCE_NOTICE in res["brief"]
+        assert res["brief"].find("LOW CONFIDENCE") < res["brief"].find("Assigned Evacuation Corridors:")
+
+    def test_five_burned_cells_persists_as_second_trigger(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr, meta = get_arrival_field(
+            mode="custom",
+            custom_field=create_unburned_arrival_field(graph.grid_x, graph.grid_y),
+            road_graph=graph,
+            min_spread_area_cells=5,
+        )
+        assert meta.is_low_confidence is True
+        assert "minimal or zero spread" in meta.reason
+
+
+class TestPhase5BReplanTriggerAndHysteresis:
+    """Requirement 4: Max active edge change trigger & hysteresis margin invariant."""
+
+    def test_max_active_edge_change_triggers_replan(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        graph = synthetic_diamond_graph
+        policy = ReplanPolicy(buffer_minutes=15.0, max_active_edge_change_threshold=15.0)
+
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr1 = create_unburned_arrival_field(graph.grid_x, graph.grid_y)
+        routes1 = plan_routes(graph, [0], [3], 0.0, arr1, 15.0)
+
+        arr2 = create_unburned_arrival_field(graph.grid_x, graph.grid_y)
+        # Select active edge 0 and set its mapped grid cell to burn at t = 20 min
+        edge0 = graph.edges[0]
+        assert len(edge0.cell_rows) > 0 and len(edge0.cell_cols) > 0
+        r_idx = edge0.cell_rows[0]
+        c_idx = edge0.cell_cols[0]
+        arr2["arrival_q10"].values[r_idx, c_idx] = 20.0
+        arr2["arrival_q50"].values[r_idx, c_idx] = 20.0
+
+        max_shift = compute_max_active_edge_change(routes1, arr1, arr2, graph)
+        assert max_shift > 15.0
+
+        routes2 = plan_routes(graph, [0], [3], 0.0, arr2, 15.0)
+        active2, dec2 = policy.decide(routes1, routes2, arr1, arr2, road_graph=graph)
+
+        assert dec2.needs_replan is True
+        assert "Max arrival change on active route edges" in dec2.reason
+
+    def test_hysteresis_never_blocks_switch_when_margin_violated(
+        self, synthetic_diamond_graph: RoadGraph
+    ) -> None:
+        """Requirement 4: Hysteresis must NEVER block a switch when current route violates its margin."""
+        graph = synthetic_diamond_graph
+        policy = ReplanPolicy(buffer_minutes=15.0, hysteresis_margin_min=10.0)
+
+        assert graph.grid_x is not None and graph.grid_y is not None
         arr = create_unburned_arrival_field(graph.grid_x, graph.grid_y)
 
-        # 1. Measure Router + Validator latency (50 repeats)
-        t_router_val = []
-        for _ in range(50):
-            t0 = time.perf_counter()
-            r = plan_routes(graph, [0], [3], 0.0, arr, 15.0)
-            _ = validate_routes(graph, r, arr, 15.0)
-            t_router_val.append((time.perf_counter() - t0) * 1000.0)
+        curr_route = EvacuationRoute(
+            origin_id=0,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=20.0,
+            total_travel_time_min=20.0,
+            min_margin_min=10.0,
+            bottleneck_edge=None,
+            edges=[],
+            node_ids=(0, 1, 3),
+            status=RouteStatus.BEST_EFFORT,
+            mode_used="fastest_safe",
+        )
+        current_routes = {0: curr_route}
 
-        # 2. Measure Mock LLM step latency (50 repeats)
-        mock_llm = MockLLMClient()
-        prompt = DeterministicBriefGenerator().build_brief_from_text_prompt("Weather: Wind 6.5 m/s")
-        t_llm = []
-        for _ in range(50):
-            t0 = time.perf_counter()
-            _ = mock_llm.generate(prompt)
-            t_llm.append((time.perf_counter() - t0) * 1000.0)
+        cand_route = EvacuationRoute(
+            origin_id=0,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=38.0,
+            total_travel_time_min=38.0,
+            min_margin_min=11.5,
+            bottleneck_edge=None,
+            edges=[],
+            node_ids=(0, 2, 3),
+            status=RouteStatus.BEST_EFFORT,
+            mode_used="max_min_margin",
+        )
+        candidate_routes = {0: cand_route}
 
-        med_rv = float(np.median(t_router_val))
-        p95_rv = float(np.percentile(t_router_val, 95))
-        med_llm = float(np.median(t_llm))
-        p95_llm = float(np.percentile(t_llm, 95))
+        active, dec = policy.decide(current_routes, candidate_routes, arr, arr, road_graph=graph)
 
-        print(f"\nRouter + Validator Latency: Median = {med_rv:.3f} ms, P95 = {p95_rv:.3f} ms")
-        print(f"Mock LLM Step Latency:     Median = {med_llm:.3f} ms, P95 = {p95_llm:.3f} ms")
+        assert dec.needs_replan is True
+        assert 0 in dec.changed_origins
+        assert 0 not in dec.flap_prevented_origins
+        assert active[0].node_ids == (0, 2, 3)
+        assert "fell below buffer" in dec.reason
 
-        # Sub-second execution
-        assert med_rv < 100.0  # < 100 ms on synthetic graph
-        assert med_llm < 10.0   # < 10 ms for mock LLM
+
+class TestPhase5BGroundingMatrix30Cases:
+    """Requirement 5: Grounding verification matrix across at least 30 diverse test cases."""
+
+    def test_thirty_case_grounding_matrix(self, synthetic_diamond_graph: RoadGraph) -> None:
+        graph = synthetic_diamond_graph
+        checker = GroundingChecker()
+
+        assert graph.grid_x is not None and graph.grid_y is not None
+        arr = create_unburned_arrival_field(graph.grid_x, graph.grid_y)
+        routes_safe = plan_routes(graph, [0], [3], 0.0, arr, 15.0)
+        exp_safe = compute_exposure(routes_safe, graph, 15.0)
+
+        # Baseline safe state
+        state_safe: AgentState = {
+            "update_id": "ST_SAFE",
+            "weather": WeatherReport(6.5, 45.0, 22.0, 15.0),
+            "arrival_field_meta": ArrivalFieldMeta(False, 100, 625, 12.0),
+            "active_routes": routes_safe,
+            "exposure_summary": exp_safe,
+            "k_star_values": {0: 3.5},
+            "buffer_minutes": 15.0,
+            "road_graph": graph,
+            "origins": [0],
+            "destinations": [3],
+        }
+
+        # Compromised best-effort state (Route for Zone 0 is best-effort)
+        r_trap = EvacuationRoute(
+            origin_id=0,
+            destination_id=3,
+            departure_time_min=0.0,
+            arrival_time_min=20.0,
+            total_travel_time_min=20.0,
+            min_margin_min=-5.0,
+            bottleneck_edge=(0, 1, 0),
+            edges=[],
+            node_ids=(0, 1, 3),
+            status=RouteStatus.BEST_EFFORT,
+            mode_used="max_min_margin",
+        )
+        routes_trap = {0: r_trap}
+        exp_trap = compute_exposure(routes_trap, graph, 15.0)
+        state_trap: AgentState = {
+            "update_id": "ST_TRAP",
+            "weather": WeatherReport(6.5, 45.0, 22.0, 15.0),
+            "arrival_field_meta": ArrivalFieldMeta(False, 100, 625, 12.0),
+            "active_routes": routes_trap,
+            "exposure_summary": exp_trap,
+            "k_star_values": {0: 1.0},
+            "buffer_minutes": 15.0,
+            "road_graph": graph,
+            "origins": [0],
+            "destinations": [3],
+        }
+
+        passes = 0
+        rejects = 0
+
+        # --- PASS CASES (18 distinct cases) ---
+        pass_cases: list[tuple[str, AgentState]] = [
+            # 1. Standard grounded safe brief
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE | Travel Time 20.0 min", state_safe),
+            # 2. Paraphrased safe corridor description
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nEvacuation corridor from Zone 0 leading toward Exit 3 is SAFE.", state_safe),
+            # 3. Abbreviated road name "Skyway N"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nTraffic moving along Skyway N towards Exit 3 is SAFE.", state_safe),
+            # 4. Abbreviated road name "Clark Rd"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nTraffic moving along Clark Rd is designated for secondary traffic.", state_safe),
+            # 5. Full road name "Clark Bypass"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nClark Bypass corridor is fully operational.", state_safe),
+            # 6. Abbreviated road name "Skyway North"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nVehicles proceeding on Skyway North toward Exit 3.", state_safe),
+            # 7. Zone leading zero variant "Zone 00"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nZone 00 traffic routed to Exit 3 is SAFE.", state_safe),
+            # 8. Zone underscore variant "Zone_0"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nZone_0 evacuation path confirmed SAFE.", state_safe),
+            # 9. Rounded travel time "20 min"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nTravel time estimated at 20 min.", state_safe),
+            # 10. Floating travel time "20.0 min"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nTravel time measured at 20.0 min.", state_safe),
+            # 11. Unit variant "mps" for wind speed
+            (f"{STANDING_CAVEAT}\nWeather: Wind speed is 6.5 mps.", state_safe),
+            # 12. Unit variant "degrees" for wind dir
+            (f"{STANDING_CAVEAT}\nWeather: Wind bearing 45 degrees.", state_safe),
+            # 13. Temperature unit variant "C"
+            (f"{STANDING_CAVEAT}\nWeather: Ambient temp 22.0 C.", state_safe),
+            # 14. RH unit variant "%"
+            (f"{STANDING_CAVEAT}\nWeather: Relative humidity 15%.", state_safe),
+            # 15. Valid best-effort brief (stating best-effort without claiming safe)
+            (f"{NO_SAFE_ROUTE_ANY_NOTICE}\n{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: BEST-EFFORT", state_trap),
+            # 16. Low confidence notice placed first
+            (f"{LOW_CONFIDENCE_NOTICE}\n{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE", state_safe),
+            # 17. Multi-corridor safe wording
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nZone 0 corridor to Exit 3 is designated SAFE.", state_safe),
+            # 18. Destination alias "Exit 3"
+            (f"{STANDING_CAVEAT}\nDestination Exit 3 is cleared for reception.", state_safe),
+        ]
+
+        for idx, (brief_txt, st) in enumerate(pass_cases, 1):
+            res = checker.check(brief_txt, st)
+            assert res.passed is True, f"Pass case {idx} failed unexpectedly: {res.rejected_tokens}"
+            passes += 1
+
+        # --- REJECT CASES (18 distinct cases) ---
+        reject_cases: list[tuple[str, AgentState, str]] = [
+            # 1. Status inconsistency: Compromised route claimed as SAFE
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE", state_trap, "status inconsistency"),
+            # 2. Status inconsistency: "Zone 0 is safe" when route is best-effort
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nZone 0 is safe for all evacuees.", state_trap, "status inconsistency"),
+            # 3. Status inconsistency: "All routes are safe" when trapped
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nAll routes are safe across the district.", state_trap, "status inconsistency"),
+            # 4. Status inconsistency: Safe route claimed to have no safe route
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nNo safe evacuation route exists for Zone 0.", state_safe, "status inconsistency"),
+            # 5. Ungrounded road "Ocean Boulevard"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nEvacuate via Ocean Boulevard to safety.", state_safe, "ocean boulevard"),
+            # 6. Ungrounded road "Interstate 80"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nTraffic routed via Interstate 80.", state_safe, "interstate 80"),
+            # 7. Ungrounded road "Broadway Ave"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nProceed along Broadway Ave.", state_safe, "broadway ave"),
+            # 8. Ungrounded road "Route 66"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nFollow Route 66 out of town.", state_safe, "route 66"),
+            # 9. Ungrounded road "Lincoln Blvd"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nEgress via Lincoln Blvd.", state_safe, "lincoln blvd"),
+            # 10. Ungrounded zone "Zone 99"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nEvacuate Zone 99 immediately.", state_safe, "zone 99"),
+            # 11. Ungrounded zone "Zone 42"
+            (f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\nShelter order for Zone 42.", state_safe, "zone 42"),
+            # 12. Quantitative clearance hours: "clearance time is 3.5 hours"
+            (f"{STANDING_CAVEAT}\nRegional clearance time is 3.5 hours for Zone 0.", state_safe, "clearance hours"),
+            # 13. Quantitative clearance hours: "cleared in 4 hrs"
+            (f"{STANDING_CAVEAT}\nCorridor will be cleared in 4 hrs.", state_safe, "clearance hours"),
+            # 14. Quantitative clearance hours: "estimated 2 hours to clear"
+            (f"{STANDING_CAVEAT}\nEstimated 2 hours to clear the town.", state_safe, "clearance hours"),
+            # 15. Missing standing caveat
+            ("Assigned Evacuation Corridors:\nZone 0 -> Exit 3 is moving freely.", state_safe, "standing caveat"),
+            # 16. Late low-confidence notice (placed after corridors)
+            (
+                f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE\n{LOW_CONFIDENCE_NOTICE}",
+                dict(state_safe, arrival_field_meta=ArrivalFieldMeta(True, 2, 625, 0.0)),
+                "low confidence notice must appear",
+            ),
+            # 17. Hallucinated number "948.5"
+            (f"{STANDING_CAVEAT}\nObserved fire speed is 948.5 m/s.", state_safe, "948.5"),
+            # 18. Hallucinated number "1234.5"
+            (f"{STANDING_CAVEAT}\nPeak congestion delay of 1234.5 minutes.", state_safe, "1234.5"),
+        ]
+
+        for idx, (brief_txt, st, expected_err) in enumerate(reject_cases, 1):
+            res = checker.check(brief_txt, st)
+            assert res.passed is False, f"Reject case {idx} passed unexpectedly!"
+            assert any(expected_err in r.lower() for r in res.rejected_tokens), (
+                f"Reject case {idx} rejected for wrong reason: {res.rejected_tokens}"
+            )
+            rejects += 1
+
+        print("\n" + "=" * 70)
+        print(f"Phase 5B 36-Case Grounding Matrix: Passes = {passes}, Rejects = {rejects}, Total = {passes + rejects}")
+        print("=" * 70)
+
+        assert passes == 18
+        assert rejects == 18
+        assert passes + rejects >= 30
+
+
+class TestPhase5BLLMAdapter:
+    """Requirement 6: Real provider implementation behind LLMClient, recorded response, and smoke test."""
+
+    def test_provider_llm_client_recorded_response_openai(self) -> None:
+        """Verify ProviderLLMClient parses an OpenAI-compatible recorded API response."""
+        recorded_response_json = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            f"{STANDING_CAVEAT}\n"
+                            "=== Wildfire Evacuation Operational Briefing ===\n"
+                            "Weather: Wind 6.5 m/s at 45 deg\n"
+                            "Assigned Evacuation Corridors:\n"
+                            "  - Zone 0 -> Exit 3: SAFE | Travel Time 20.0 min\n"
+                            "Traffic Conditions: Free-flowing"
+                        ),
+                    }
+                }
+            ]
+        }
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = recorded_response_json
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("httpx.Client.post", return_value=mock_resp):
+            client = ProviderLLMClient(provider="openai", api_key="sk-mock-key-secret-1234")
+            result = client.generate("Please generate an evacuation briefing.")
+
+            assert STANDING_CAVEAT in result
+            assert "Zone 0 -> Exit 3: SAFE" in result
+            # Security verification: API key must NEVER be printed or in the result
+            assert "sk-mock-key-secret-1234" not in result
+
+    def test_provider_llm_client_recorded_response_anthropic(self) -> None:
+        """Verify ProviderLLMClient parses an Anthropic-compatible recorded API response."""
+        recorded_response_json = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"{STANDING_CAVEAT}\n"
+                        "=== Wildfire Evacuation Operational Briefing ===\n"
+                        "Assigned Evacuation Corridors:\n"
+                        "  - Zone 0 -> Exit 3: SAFE"
+                    ),
+                }
+            ]
+        }
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = recorded_response_json
+        mock_resp.raise_for_status.return_value = None
+
+        with patch("httpx.Client.post", return_value=mock_resp):
+            client = ProviderLLMClient(provider="anthropic", api_key="anthropic-secret-5678")
+            result = client.generate("Please generate brief.")
+
+            assert STANDING_CAVEAT in result
+            assert "anthropic-secret-5678" not in result
+
+    def test_provider_llm_client_missing_key_raises_error(self) -> None:
+        """If real provider is selected but no API key is available, raises clear ValueError."""
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "", "LLM_API_KEY": ""}, clear=True):
+            client = ProviderLLMClient(provider="openai", api_key="")
+            with pytest.raises(ValueError, match="API key environment variable not set"):
+                client.generate("Generate brief.")
+
+    def test_create_llm_client_factory_env_selection(self) -> None:
+        with patch.dict(os.environ, {"LLM_PROVIDER": "mock"}):
+            c = create_llm_client()
+            assert isinstance(c, MockLLMClient)
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": "openai"}):
+            c = create_llm_client()
+            assert isinstance(c, ProviderLLMClient)
+            assert c.provider == "openai"
+
+    @pytest.mark.skipif(
+        not os.getenv("OPENAI_API_KEY")
+        and not os.getenv("ANTHROPIC_API_KEY")
+        and not os.getenv("GEMINI_API_KEY"),
+        reason="Real LLM API key not set in environment (skipped in offline test runs)",
+    )
+    def test_live_provider_smoke_test(self) -> None:
+        """Live smoke test that executes against live API only when a valid key is in the environment."""
+        provider = "openai" if os.getenv("OPENAI_API_KEY") else "anthropic" if os.getenv("ANTHROPIC_API_KEY") else "gemini"
+        client = ProviderLLMClient(provider=provider)
+        response = client.generate("Reply with exact word: CONFIRMED")
+        assert len(response) > 0
