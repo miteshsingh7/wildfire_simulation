@@ -7,6 +7,7 @@ from wf052.agent.contracts import (
     GroundingResult,
     ObservationConsistencyResult,
     ReplanDecision,
+    RouteLevelExposure,
     WeatherReport,
     log_step_event,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "ProviderLLMClient",
     "ReplanDecision",
     "ReplanPolicy",
+    "RouteLevelExposure",
     "WeatherReport",
     "check_field_vs_observations",
     "compute_exposure",

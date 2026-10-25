@@ -199,6 +199,7 @@ class EvacuationAgent:
         )
 
         outputs = {
+            "route_level_exposure": exposure,
             "exposure_summary": exposure,
             "k_star_values": k_stars,
         }
@@ -207,7 +208,7 @@ class EvacuationAgent:
             step_name="compute_exposure",
             update_id=update_id,
             inputs={"route_count": len(planned_routes)},
-            outputs={"exposure": exposure.to_dict(), "k_stars": k_stars},
+            outputs={"route_level_exposure": exposure.to_dict(), "k_stars": k_stars},
         )
         return outputs
 

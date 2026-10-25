@@ -14,6 +14,7 @@ from wf052.agent.contracts import (
     ArrivalFieldMeta,
     ExposureSummary,
     ObservationConsistencyResult,
+    RouteLevelExposure,
     WeatherReport,
 )
 from wf052.routing.contracts import (
@@ -380,8 +381,12 @@ def compute_exposure(
     routes: dict[int, EvacuationRoute],
     road_graph: RoadGraph,
     buffer_minutes: float = 15.0,
-) -> ExposureSummary:
-    """Compute entrapment exposure metrics and qualitative traffic conditions."""
+) -> RouteLevelExposure:
+    """Compute route-level safety margin exposure and qualitative traffic conditions.
+
+    Note: This computes static route-level margins (t_fire - t_exit); it does NOT
+    track dynamic time-sliced vehicle cohort trajectories.
+    """
     trapped_count = 0
     safe_count = 0
     margins = []
@@ -412,7 +417,7 @@ def compute_exposure(
     else:
         qualitative = "Free-flowing conditions; healthy safety buffer ahead of fire arrival."
 
-    return ExposureSummary(
+    return RouteLevelExposure(
         total_routes=len(routes),
         trapped_count=trapped_count,
         safe_count=safe_count,

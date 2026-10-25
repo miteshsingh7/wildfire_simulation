@@ -506,6 +506,51 @@ class TestBriefsAndGrounding:
         assert mock_llm.call_count == 2
         assert "888.8" not in res["brief"]
 
+    def test_grounding_numeric_tolerance_boundaries(self, synthetic_diamond_graph: RoadGraph) -> None:
+        """Requirement 0c: Numeric tolerance boundary tests (just inside and just outside tolerance).
+
+        GroundingChecker tolerance is numeric_tolerance = 0.15.
+        Ground truth travel time for Zone 0 is 20.0 min.
+        - Just inside: 20.14 min (abs diff = 0.14 <= 0.15) -> PASS
+        - Just outside: 20.16 min (abs diff = 0.16 > 0.15) -> REJECT
+        - Just inside: 19.86 min (abs diff = 0.14 <= 0.15) -> PASS
+        - Just outside: 19.84 min (abs diff = 0.16 > 0.15) -> REJECT
+        """
+        checker = GroundingChecker(numeric_tolerance=0.15)
+        arr = create_unburned_arrival_field(synthetic_diamond_graph.grid_x, synthetic_diamond_graph.grid_y)
+        routes = plan_routes(synthetic_diamond_graph, [0], [3], 0.0, arr, 15.0)
+
+        state: AgentState = {
+            "update_id": "BOUND_001",
+            "buffer_minutes": 15.0,
+            "active_routes": routes,
+            "road_graph": synthetic_diamond_graph,
+            "origins": [0],
+            "destinations": [3],
+        }
+
+        # 1. Just inside (+0.14) -> PASS
+        brief_inside_high = f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE | Travel Time 20.14 min"
+        res_in_high = checker.check(brief_inside_high, state)
+        assert res_in_high.passed is True, f"Failed inside +0.14: {res_in_high.rejected_tokens}"
+
+        # 2. Just inside (-0.14) -> PASS
+        brief_inside_low = f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE | Travel Time 19.86 min"
+        res_in_low = checker.check(brief_inside_low, state)
+        assert res_in_low.passed is True, f"Failed inside -0.14: {res_in_low.rejected_tokens}"
+
+        # 3. Just outside (+0.16) -> REJECT
+        brief_outside_high = f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE | Travel Time 20.16 min"
+        res_out_high = checker.check(brief_outside_high, state)
+        assert res_out_high.passed is False
+        assert any("20.16" in r for r in res_out_high.rejected_tokens)
+
+        # 4. Just outside (-0.16) -> REJECT
+        brief_outside_low = f"{STANDING_CAVEAT}\nAssigned Evacuation Corridors:\n  - Zone 0 -> Exit 3: SAFE | Travel Time 19.84 min"
+        res_out_low = checker.check(brief_outside_low, state)
+        assert res_out_low.passed is False
+        assert any("19.84" in r for r in res_out_low.rejected_tokens)
+
     def test_grounding_pass_and_reject_matrix(self, synthetic_diamond_graph: RoadGraph) -> None:
         """Requirement 4: Grounding pass and reject matrix verification.
 

@@ -59,11 +59,15 @@ class ArrivalFieldMeta:
 
 
 @dataclass(frozen=True)
-class ExposureSummary:
-    """Summary of vehicle exposure and entrapment risk."""
+class RouteLevelExposure:
+    """Summary of route-level safety margin exposure and bottleneck risk.
+
+    Note: This metric evaluates static route-level margins (t_fire - t_exit);
+    it does NOT track dynamic time-sliced vehicle cohort trajectories.
+    """
 
     total_routes: int
-    trapped_count: int
+    trapped_count: int  # Count of routes failing minimum safety margin buffer
     safe_count: int
     lowest_margin_min: float
     bottleneck_edges: list[tuple[int, int]]
@@ -78,6 +82,10 @@ class ExposureSummary:
             "bottleneck_edges": [list(e) for e in self.bottleneck_edges],
             "qualitative_traffic": self.qualitative_traffic,
         }
+
+
+# Backward compatibility alias
+ExposureSummary = RouteLevelExposure
 
 
 @dataclass(frozen=True)
@@ -138,6 +146,7 @@ class AgentState(TypedDict, total=False):
     validation_results: dict[int, ValidationResult]
 
     # Exposure & slowdown metrics
+    route_level_exposure: RouteLevelExposure
     exposure_summary: ExposureSummary
     k_star_values: dict[int, float]
 
