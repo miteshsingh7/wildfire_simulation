@@ -71,6 +71,7 @@ class ReplayOriginResult:
     replan_count: int
     warning_lead_time_min: float | None
     flagged_before_onset: bool
+    hazard_misses_by_type: dict[str, bool] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -94,6 +95,9 @@ class MethodMetrics:
     min_margin_median: float
     min_margin_p10: float
     mean_step_latency_ms: float
+    miss_count_burnovers: int = 0
+    miss_count_roadblocks: int = 0
+    miss_count_abandoned: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

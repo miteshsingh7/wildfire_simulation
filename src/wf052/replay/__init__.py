@@ -20,6 +20,7 @@ from wf052.replay.methods import (
 from wf052.replay.metrics import (
     aggregate_method_metrics,
     check_route_hazard_miss,
+    check_route_hazard_miss_by_type,
     compute_bootstrap_ci,
     compute_warning_lead_time,
 )
@@ -28,6 +29,7 @@ from wf052.replay.providers import (
     ObservationInflatedProvider,
     SurrogateFieldProvider,
     TeacherFieldProvider,
+    TeacherV2FieldProvider,
 )
 
 __all__ = [
@@ -40,9 +42,11 @@ __all__ = [
     "ReplayOriginResult",
     "SurrogateFieldProvider",
     "TeacherFieldProvider",
+    "TeacherV2FieldProvider",
     "TruthHazard",
     "aggregate_method_metrics",
     "check_route_hazard_miss",
+    "check_route_hazard_miss_by_type",
     "compute_bootstrap_ci",
     "compute_warning_lead_time",
     "parse_clock_to_elapsed_min",

@@ -16,7 +16,10 @@ import numpy as np
 
 from wf052.replay.contracts import ReplayOriginResult, TruthHazard
 from wf052.replay.harness import CausalReplayHarness
-from wf052.replay.metrics import check_route_hazard_miss, compute_warning_lead_time
+from wf052.replay.metrics import (
+    check_route_hazard_miss_by_type,
+    compute_warning_lead_time,
+)
 from wf052.routing.contracts import (
     EvacuationRoute,
 )
@@ -132,7 +135,8 @@ def run_static_baseline(
             edge_fire_arrivals=None,
         )
 
-        is_miss, _ = check_route_hazard_miss(route, truth_hazards, road_graph)
+        by_type = check_route_hazard_miss_by_type(route, truth_hazards, road_graph)
+        is_miss, _ = by_type["total"]
         tt = route.total_travel_time_min if route is not None else float("inf")
         margin = route.min_margin_min if route is not None else -float("inf")
 
@@ -147,7 +151,8 @@ def run_static_baseline(
                 min_margin_min=margin,
                 replan_count=0,
                 warning_lead_time_min=None,
-                flagged_before_onset=not is_miss,
+                flagged_before_onset=False,  # Static route cannot flag or divert anything
+                hazard_misses_by_type={k: v[0] for k, v in by_type.items()},
             )
         )
 
@@ -258,7 +263,8 @@ def run_reactive_baseline(
     results: list[ReplayOriginResult] = []
     for orig in origins:
         final_r = routes[orig.origin_id]
-        is_miss, _ = check_route_hazard_miss(final_r, truth_hazards, road_graph)
+        by_type = check_route_hazard_miss_by_type(final_r, truth_hazards, road_graph)
+        is_miss, _ = by_type["total"]
         lead_time, flagged_before = compute_warning_lead_time(
             initial_route=initial_routes[orig.origin_id],
             replan_history=replan_histories[orig.origin_id],
@@ -280,6 +286,7 @@ def run_reactive_baseline(
                 replan_count=replan_counts[orig.origin_id],
                 warning_lead_time_min=lead_time,
                 flagged_before_onset=flagged_before,
+                hazard_misses_by_type={k: v[0] for k, v in by_type.items()},
             )
         )
 
@@ -403,7 +410,8 @@ def run_agent_simulation(
     results: list[ReplayOriginResult] = []
     for orig in origins:
         final_r = routes[orig.origin_id]
-        is_miss, _ = check_route_hazard_miss(final_r, truth_hazards, road_graph)
+        by_type = check_route_hazard_miss_by_type(final_r, truth_hazards, road_graph)
+        is_miss, _ = by_type["total"]
         lead_time, flagged_before = compute_warning_lead_time(
             initial_route=initial_routes[orig.origin_id],
             replan_history=replan_histories[orig.origin_id],
@@ -425,6 +433,7 @@ def run_agent_simulation(
                 replan_count=replan_counts[orig.origin_id],
                 warning_lead_time_min=lead_time,
                 flagged_before_onset=flagged_before,
+                hazard_misses_by_type={k: v[0] for k, v in by_type.items()},
             )
         )
 

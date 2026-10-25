@@ -93,6 +93,128 @@ class TeacherFieldProvider(FieldProvider):
         return self._cached_field
 
 
+class TeacherV2FieldProvider(FieldProvider):
+    """Provider A2: Teacher v2 frozen field on Camp Fire domain (ember kernel + causal assimilation).
+
+    Physics: Contact spread (P_base=0.22) + non-local lognormal ember spotting
+    (alpha=0.0040, beta=110.0 m/(m/s), p_urban_wui=0.15) calibrated on wind training fires.
+    Causal Assimilation: At clock time t, merges observed burned extents up to t - latency
+    with the physics forward simulation.
+    """
+
+    def __init__(
+        self,
+        tif_path: str | Path = "data/tiles/arrival_time_teacher_v2_60m_seed42.tif",
+        assimilate: bool = True,
+        patch_radius_m: float = 120.0,
+    ) -> None:
+        self.tif_path = Path(tif_path)
+        self.assimilate = assimilate
+        self.patch_radius_m = patch_radius_m
+        self._cached_base_field: ArrivalField | None = None
+        self._gx: np.ndarray | None = None
+        self._gy: np.ndarray | None = None
+        self._load_raster()
+
+    def _load_raster(self) -> None:
+        if not self.tif_path.exists():
+            raise FileNotFoundError(f"Teacher v2 raster not found at {self.tif_path}")
+
+        with rasterio.open(self.tif_path) as src:
+            data = src.read(1).astype(np.float64)
+            bounds = src.bounds
+            width = src.width
+            height = src.height
+
+        dx = (bounds.right - bounds.left) / width
+        dy = (bounds.top - bounds.bottom) / height
+        gx = np.linspace(bounds.left + dx / 2.0, bounds.right - dx / 2.0, width)
+        gy = np.linspace(bounds.top - dy / 2.0, bounds.bottom + dy / 2.0, height)
+        self._gx = gx
+        self._gy = gy
+
+        data = np.where(np.isfinite(data) & (data >= 0.0), data, np.inf)
+
+        ds = xr.Dataset(
+            data_vars={
+                "arrival_q10": (["y", "x"], data),
+                "arrival_q50": (["y", "x"], data),
+                "arrival_q90": (["y", "x"], data),
+            },
+            coords={"x": gx, "y": gy},
+            attrs={
+                "provider": "teacher_v2",
+                "source_file": str(self.tif_path),
+                "crs": "EPSG:32610",
+                "ignition_time": "2018-11-08T14:33:00Z",
+            },
+        )
+        validate_arrival_field(ds)
+        self._cached_base_field = ds
+
+    def get_field(
+        self,
+        current_step_min: float,
+        visible_observations: gpd.GeoDataFrame | None = None,
+    ) -> ArrivalField:
+        if self._cached_base_field is None:
+            self._load_raster()
+
+        if not self.assimilate or visible_observations is None or len(visible_observations) == 0:
+            return self._cached_base_field
+
+        gx = self._gx
+        gy = self._gy
+        if gx is None or gy is None:
+            return self._cached_base_field
+
+        ny, nx = len(gy), len(gx)
+        dx = float(gx[1] - gx[0])
+        dy = float(gy[0] - gy[1])
+
+        base_arr = self._cached_base_field["arrival_q50"].values.copy()
+        assim_arr = base_arr.copy()
+
+        for _, obs in visible_observations.iterrows():
+            t_obs = float(obs.get("elapsed_minutes_adj", obs.get("elapsed_minutes", 0.0)))
+            if t_obs > current_step_min:
+                continue
+            geom = obs.geometry
+            if geom is None:
+                continue
+            ox = float(geom.x) if hasattr(geom, "x") else float(geom.centroid.x)
+            oy = float(geom.y) if hasattr(geom, "y") else float(geom.centroid.y)
+
+            # Local patch around observation
+            c_min = max(0, int((ox - self.patch_radius_m - gx[0]) / dx))
+            c_max = min(nx, int((ox + self.patch_radius_m - gx[0]) / dx) + 1)
+            r_min = max(0, int((gy[0] - (oy + self.patch_radius_m)) / dy))
+            r_max = min(ny, int((gy[0] - (oy - self.patch_radius_m)) / dy) + 1)
+
+            if c_min >= c_max or r_min >= r_max:
+                continue
+
+            sub = assim_arr[r_min:r_max, c_min:c_max]
+            sub[:] = np.minimum(sub, t_obs)
+
+        ds = xr.Dataset(
+            data_vars={
+                "arrival_q10": (["y", "x"], assim_arr),
+                "arrival_q50": (["y", "x"], assim_arr),
+                "arrival_q90": (["y", "x"], assim_arr),
+            },
+            coords={"x": gx, "y": gy},
+            attrs={
+                "provider": "teacher_v2_causal_assimilated",
+                "label": "teacher_v2 (embers + causal assimilation)",
+                "crs": "EPSG:32610",
+                "ignition_time": "2018-11-08T14:33:00Z",
+            },
+        )
+        validate_arrival_field(ds)
+        return ds
+
+
 class ObservationInflatedProvider(FieldProvider):
     """Provider B: Heuristic observation-inflated field.
 
@@ -100,17 +222,19 @@ class ObservationInflatedProvider(FieldProvider):
     1. Arrival time at detected cells is set to the observation timestamp.
     2. Cells within R_spot (e.g. 1, 2, 4, 7 km) downwind of each detection receive:
          arrival = detection_time + distance / assumed_spread_speed
-    3. The field is formed by taking the pointwise minimum with Provider A (teacher_v1).
+    3. The field is formed by taking the pointwise minimum with Provider A (teacher_v1 or teacher_v2).
     """
 
     def __init__(
         self,
-        base_teacher_provider: TeacherFieldProvider | None = None,
+        base_teacher_provider: FieldProvider | None = None,
         r_spot_km: float = 4.0,
         assumed_spread_speed_mps: float = 0.5833,  # 35.0 m/min = ~0.583 m/s (~2.1 km/h)
         wind_towards_deg: float = 240.0,  # Southwest downwind heading (azimuth)
         wind_cone_half_angle_deg: float = 60.0,
         horizon_minutes: float = 720.0,
+        filter_leakage: bool = False,
+        leakage_exclusion_indices: set[int] | None = None,
     ) -> None:
         self.base_provider = base_teacher_provider or TeacherFieldProvider()
         self.r_spot_km = float(r_spot_km)
@@ -119,6 +243,8 @@ class ObservationInflatedProvider(FieldProvider):
         self.wind_towards_deg = wind_towards_deg
         self.wind_cone_rad = np.radians(wind_cone_half_angle_deg)
         self.horizon_minutes = horizon_minutes
+        self.filter_leakage = filter_leakage
+        self.leakage_exclusion_indices = leakage_exclusion_indices or set()
 
         # Precompute downwind unit vector
         wind_rad = np.radians(90.0 - wind_towards_deg)  # Math angle from east
@@ -158,8 +284,11 @@ class ObservationInflatedProvider(FieldProvider):
         base_arr = base_field["arrival_q50"].values.copy()
         inflated_arr = np.full((ny, nx), np.inf, dtype=np.float64)
 
-        for _, obs in visible_observations.iterrows():
-            t_obs = float(obs.get("elapsed_minutes", 0.0))
+        for obs_idx, obs in visible_observations.iterrows():
+            if self.filter_leakage and obs_idx in self.leakage_exclusion_indices:
+                continue
+
+            t_obs = float(obs.get("elapsed_minutes_adj", obs.get("elapsed_minutes", 0.0)))
             if t_obs > current_step_min:
                 continue
 

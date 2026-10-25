@@ -16,6 +16,7 @@ from wf052.replay.providers import (
     ObservationInflatedProvider,
     SurrogateFieldProvider,
     TeacherFieldProvider,
+    TeacherV2FieldProvider,
 )
 from wf052.routing.contracts import validate_arrival_field
 from wf052.routing.graph import RoadGraph, load_camp_fire_road_graph
@@ -122,7 +123,18 @@ def test_field_providers(full_road_graph: RoadGraph) -> None:
     assert field_a.attrs["provider"] == "teacher_v1"
     assert field_a.attrs["crs"] == "EPSG:32610"
 
-    # 2. Provider B with R_spot sensitivity
+    # 1b. Provider A2 (teacher_v2 with embers)
+    prov_a2 = TeacherV2FieldProvider(assimilate=True)
+    field_a2 = prov_a2.get_field(60.0)
+    validate_arrival_field(field_a2)
+    assert field_a2.attrs["provider"] == "teacher_v2"
+    assert field_a2.attrs["crs"] == "EPSG:32610"
+    # More burned cells than teacher_v1 because embers crossed canyon
+    assert np.count_nonzero(np.isfinite(field_a2["arrival_q50"].values)) > np.count_nonzero(
+        np.isfinite(field_a["arrival_q50"].values)
+    )
+
+    # 2. Provider B with R_spot sensitivity and leakage filtering
     for r_spot in (1.0, 2.0, 4.0, 7.0):
         prov_b = ObservationInflatedProvider(r_spot_km=r_spot)
         # Synthetic single observation at (625000, 4405000) at t=30 min
@@ -141,6 +153,12 @@ def test_field_providers(full_road_graph: RoadGraph) -> None:
 
         # Pointwise minimum with teacher field
         assert np.all(field_b["arrival_q50"].values <= field_a["arrival_q50"].values)
+
+    # 2b. Provider B built on Provider A2
+    prov_b_a2 = ObservationInflatedProvider(base_teacher_provider=prov_a2, r_spot_km=4.0)
+    field_b_a2 = prov_b_a2.get_field(60.0, visible_observations=synth_obs)
+    validate_arrival_field(field_b_a2)
+    assert np.all(field_b_a2["arrival_q50"].values <= field_a2["arrival_q50"].values)
 
     # 3. Provider C raises NotImplementedError
     prov_c = SurrogateFieldProvider()

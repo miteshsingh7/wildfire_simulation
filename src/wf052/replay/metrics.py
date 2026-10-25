@@ -78,6 +78,25 @@ def check_route_hazard_miss(
     return is_miss, sorted(set(encountered_ids))
 
 
+def check_route_hazard_miss_by_type(
+    route: EvacuationRoute | None,
+    hazards: Sequence[TruthHazard],
+    road_graph: RoadGraph,
+    spatial_radius_m: float = 120.0,
+) -> dict[str, tuple[bool, list[str]]]:
+    """Check hazard misses categorized by hazard type: burnover, roadblock, abandoned_vehicle, and total."""
+    categories = ("burnover", "roadblock", "abandoned_vehicle")
+    res = {}
+    for cat in categories:
+        cat_hazards = [h for h in hazards if h.hazard_type == cat]
+        is_miss, ids = check_route_hazard_miss(route, cat_hazards, road_graph, spatial_radius_m)
+        res[cat] = (is_miss, ids)
+
+    total_miss, total_ids = check_route_hazard_miss(route, hazards, road_graph, spatial_radius_m)
+    res["total"] = (total_miss, total_ids)
+    return res
+
+
 def compute_warning_lead_time(
     initial_route: EvacuationRoute | None,
     replan_history: list[tuple[float, EvacuationRoute | None]],
@@ -93,14 +112,14 @@ def compute_warning_lead_time(
         lead_time = t_onset - t_replan.
     If flagged before onset (lead_time > 0), flagged_before_onset is True.
 
-    If the initial route never encounters any hazard, returns (None, True).
+    If the initial route never encounters any hazard, returns (None, False).
     If a hazard was encountered and never diverted before onset, returns (0.0, False).
     """
     initial_miss, initial_hazards = check_route_hazard_miss(
         initial_route, hazards, road_graph, spatial_radius_m
     )
     if not initial_miss or not initial_hazards:
-        return None, True
+        return None, False
 
     # Find the earliest hazard onset time among those initially encountered
     hazard_dict = {h.hazard_id: h for h in hazards}
@@ -225,14 +244,34 @@ def aggregate_method_metrics(
     replan_counts = np.array([r.replan_count for r in results], dtype=np.float64)
     replan_mean = float(np.mean(replan_counts))
 
-    # 5. Margins
-    margins = np.array([r.min_margin_min for r in results if np.isfinite(r.min_margin_min)])
-    if len(margins) > 0:
-        margin_med = float(np.median(margins))
-        margin_p10 = float(np.percentile(margins, 10.0))
+    # 5. Margins in minutes (where field predicts no arrival, margin is +inf)
+    all_margins = np.array([r.min_margin_min for r in results], dtype=np.float64)
+    if len(all_margins) > 0:
+        margin_med = float(np.median(all_margins))
+        margin_p10 = float(np.percentile(all_margins, 10.0, method="nearest"))
     else:
-        margin_med = 0.0
-        margin_p10 = 0.0
+        margin_med = float("inf")
+        margin_p10 = float("inf")
+
+    # 6. Breakdown by hazard type
+    miss_bo = sum(
+        1
+        for r in results
+        if r.hazard_misses_by_type
+        and r.hazard_misses_by_type.get("burnover", False)
+    )
+    miss_rb = sum(
+        1
+        for r in results
+        if r.hazard_misses_by_type
+        and r.hazard_misses_by_type.get("roadblock", False)
+    )
+    miss_av = sum(
+        1
+        for r in results
+        if r.hazard_misses_by_type
+        and r.hazard_misses_by_type.get("abandoned_vehicle", False)
+    )
 
     return MethodMetrics(
         method_name=method_name,
@@ -249,4 +288,7 @@ def aggregate_method_metrics(
         min_margin_median=margin_med,
         min_margin_p10=margin_p10,
         mean_step_latency_ms=mean_step_latency_ms,
+        miss_count_burnovers=miss_bo,
+        miss_count_roadblocks=miss_rb,
+        miss_count_abandoned=miss_av,
     )
