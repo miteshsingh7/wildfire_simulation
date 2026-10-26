@@ -199,3 +199,54 @@ def test_sample_block_origins(full_road_graph: RoadGraph) -> None:
         assert orig.origin_id in full_road_graph.nodes
         assert orig.departure_time_min >= 0.0
         assert orig.assigned_zone.startswith("Zone_")
+
+
+def test_spot_radius_field_changes() -> None:
+    """Verify that changing r_spot_km parameter reaches the provider and alters the arrival field."""
+    synth_obs = gpd.GeoDataFrame(
+        {
+            "elapsed_minutes_adj": [30.0],
+            "geometry": [shapely.geometry.Point(630000.0, 4400000.0)],
+        },
+        crs="EPSG:32610",
+    )
+    base_prov = TeacherFieldProvider()
+    f_base = base_prov.get_field(60.0)
+
+    prov_1km = ObservationInflatedProvider(r_spot_km=1.0)
+    prov_4km = ObservationInflatedProvider(r_spot_km=4.0)
+    prov_7km = ObservationInflatedProvider(r_spot_km=7.0)
+
+    f_1km = prov_1km.get_field(60.0, visible_observations=synth_obs)
+    f_4km = prov_4km.get_field(60.0, visible_observations=synth_obs)
+    f_7km = prov_7km.get_field(60.0, visible_observations=synth_obs)
+
+    # Count newly inflated cells compared to the base teacher
+    inf_1km = int(np.count_nonzero(f_1km["arrival_q50"].values < f_base["arrival_q50"].values))
+    inf_4km = int(np.count_nonzero(f_4km["arrival_q50"].values < f_base["arrival_q50"].values))
+    inf_7km = int(np.count_nonzero(f_7km["arrival_q50"].values < f_base["arrival_q50"].values))
+
+    assert inf_1km < inf_4km < inf_7km, f"Expected strictly increasing inflation: {inf_1km} < {inf_4km} < {inf_7km}"
+    assert not np.array_equal(f_1km["arrival_q50"].values, f_4km["arrival_q50"].values)
+    assert not np.array_equal(f_4km["arrival_q50"].values, f_7km["arrival_q50"].values)
+
+
+def test_teacher_v2_freeze_hash() -> None:
+    """Verify that configs/teacher_v2.yaml loads and matches the frozen SHA-256 hash."""
+    import hashlib
+    from pathlib import Path
+
+    cfg_path = Path("configs/teacher_v2.yaml")
+    assert cfg_path.exists(), "configs/teacher_v2.yaml does not exist"
+
+    raw_bytes = cfg_path.read_bytes()
+    computed_hash = hashlib.sha256(raw_bytes).hexdigest()
+    expected_hash = "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"
+
+    assert computed_hash == expected_hash, f"Hash mismatch: {computed_hash} != {expected_hash}"
+
+    # Also assert the 8-char hash named copy exists and is identical
+    first8 = expected_hash[:8]
+    copy_path = Path(f"configs/teacher_v2_{first8}.yaml")
+    assert copy_path.exists(), f"Copy {copy_path} does not exist"
+    assert copy_path.read_bytes() == raw_bytes
