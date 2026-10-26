@@ -54,4 +54,5 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+/output/
 uv.lock

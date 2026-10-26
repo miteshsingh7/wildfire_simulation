@@ -1,0 +1,48 @@
+version: teacher_v2
+phase: 1B_frozen
+operating_resolution_m: 60
+steps_per_hour: 30
+dt_seconds: 120.0
+crs: EPSG:32610
+landfire_vintage: LANDFIRE 2016 Remap (LF 2.0.0)
+
+contact_parameters:
+  p_base: 0.22
+  a: 0.06
+  c_1: 0.045
+  c_2: 0.15
+  p_continue: 0.30
+  fuel_scale_grass_shrub: 1.0
+  fuel_scale_timber: 1.0
+  canopy_den_scale: 1.0
+  wind_moisture_damping: 0.0
+
+ember_parameters:
+  use_ember_kernel: true
+  alpha_launch: 0.0040
+  beta_dist_m_per_ms: 110.0
+  p_urban_wui: 0.15
+  spotting_max_dist_m: 6000.0
+  lateral_scatter_deg: 18.0
+  log_std_distance: 0.65
+  wind_lofting_threshold_mps: 4.0
+
+calibrated_on_fires:
+  - Kincade (2019)
+  - Glass (2020)
+  - Zogg (2020)
+
+development_case_not_in_fit:
+  fire_name: Camp Fire (2018)
+  status: development case (used for percolation criticality sweep and assimilation test mode; never tuned or fitted on)
+
+fresh_held_out_fire_proposals:
+  primary_1: Slater and Devil (2020, Klamath NF, 63700 ha, wind-driven)
+  primary_2: Walker (2019, Plumas NF, 22100 ha, wind-driven)
+  alternate: W-5 Cold Springs (2020, Modoc NF, 34200 ha, wind-driven)
+
+assimilation_specification:
+  patch_size_m: 180.0
+  morphological_closing_cells: 1
+  water_exclusion_code: 98
+  eval_windows_hours: [1, 2, 3]

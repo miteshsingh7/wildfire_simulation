@@ -1,0 +1,8 @@
+method,trapped_origins,bo_routed_encounters,rb_encounters_OBSERVED_INPUT,av_routed_mean,av_routed_median,av_routed_p90,av_origin_at_least_one,av_unique_met
+static,0/200 (0.0%),1 (1/23 unique met),94 (8/178 unique met),5.165,3.0,9.0,168/200 (84.0%),172/235 (73.2%)
+reactive,25/200 (12.5%),0 (0/23 unique met),0 (0/178 unique met),3.32,2.0,5.599999999999994,137/175 (78.3%),136/235 (57.9%)
+agent_a,1/200 (0.5%),0 (0/23 unique met),0 (0/178 unique met),3.7688442211055277,2.0,9.0,163/199 (81.9%),95/235 (40.4%)
+agent_a2,2/200 (1.0%),0 (0/23 unique met),0 (0/178 unique met),3.2777777777777777,2.0,5.0,155/198 (78.3%),139/235 (59.1%)
+agent_b_on_a,6/200 (3.0%),0 (0/23 unique met),0 (0/178 unique met),2.61340206185567,1.0,2.0,138/194 (71.1%),64/235 (27.2%)
+agent_b_on_a2,6/200 (3.0%),0 (0/23 unique met),0 (0/178 unique met),2.5876288659793816,1.0,2.0,135/194 (69.6%),64/235 (27.2%)
+agent_b_clean,5/200 (2.5%),0 (0/23 unique met),0 (0/178 unique met),3.651282051282051,2.0,7.0,143/195 (73.3%),121/235 (51.5%)

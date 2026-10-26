@@ -1,0 +1,25 @@
+hazard_type,method,diff_pct,ci_95,n10_improved,n01_degraded,mcnemar_p,significant
+total,reactive_0,-2.9999999999999916,"[-6.0%, -0.5%]",7,1,0.0703125,False
+total,agent_a,-2.0000000000000018,"[-4.0%, -0.5%]",4,0,0.125,False
+total,agent_a2,-5.499999999999994,"[-9.0%, -2.0%]",12,1,0.00341796875,True
+total,agent_b_on_a,-12.0,"[-17.0%, -7.0%]",27,3,8.430331945419312e-06,True
+total,agent_b_on_a2,-13.5,"[-19.0%, -8.0%]",30,3,1.4011748135089874e-06,True
+total,agent_b_clean,-9.999999999999998,"[-15.0%, -5.0%]",23,3,8.797645568847656e-05,True
+burnover,reactive_0,12.0,"[+7.5%, +16.5%]",0,24,1.1920928955078125e-07,True
+burnover,agent_a,0.0,"[-1.5%, +1.5%]",1,1,1.0,False
+burnover,agent_a2,0.5,"[-1.0%, +2.0%]",1,2,1.0,False
+burnover,agent_b_on_a,2.5,"[+0.0%, +5.0%]",1,6,0.125,False
+burnover,agent_b_on_a2,2.5,"[+0.0%, +5.0%]",1,6,0.125,False
+burnover,agent_b_clean,2.0,"[+0.0%, +4.5%]",1,5,0.21875,False
+roadblock,reactive_0,-29.5,"[-37.0%, -22.0%]",68,9,2.4488215083103315e-12,True
+roadblock,agent_a,-41.5,"[-48.5%, -34.5%]",84,1,4.446095792472524e-24,True
+roadblock,agent_a2,-41.0,"[-48.0%, -34.0%]",84,2,9.672843288041967e-23,True
+roadblock,agent_b_on_a,-39.0,"[-46.0%, -32.0%]",81,3,1.0221367431741194e-20,True
+roadblock,agent_b_on_a2,-39.0,"[-46.0%, -32.0%]",81,3,1.0221367431741194e-20,True
+roadblock,agent_b_clean,-39.49999999999999,"[-47.0%, -32.5%]",82,3,5.295300088834776e-21,True
+abandoned_vehicle,reactive_0,-2.9999999999999916,"[-6.0%, -0.5%]",7,1,0.0703125,False
+abandoned_vehicle,agent_a,-2.0000000000000018,"[-4.0%, -0.5%]",4,0,0.125,False
+abandoned_vehicle,agent_a2,-5.499999999999994,"[-9.0%, -2.0%]",12,1,0.00341796875,True
+abandoned_vehicle,agent_b_on_a,-12.0,"[-17.0%, -7.0%]",27,3,8.430331945419312e-06,True
+abandoned_vehicle,agent_b_on_a2,-13.5,"[-19.0%, -8.0%]",30,3,1.4011748135089874e-06,True
+abandoned_vehicle,agent_b_clean,-9.999999999999998,"[-15.0%, -5.0%]",23,3,8.797645568847656e-05,True

@@ -20,6 +20,8 @@ import numpy as np
 import pytest
 import shapely.geometry
 
+pytestmark = pytest.mark.slow
+
 from wf052.routing.congestion import (
     CongestionModel,
     TimeSlicedAssignmentEngine,
