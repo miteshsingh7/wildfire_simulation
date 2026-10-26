@@ -295,6 +295,8 @@ class SurrogateTrainer:
                     pred_burn_logits=out.burn_logits,
                     target_arrival=batch.target_arrival,
                     censor_mask=batch.censor_mask,
+                    target_quantiles=batch.target_quantiles,
+                    censor_quantiles=batch.censor_quantiles,
                 )
 
             if self.device.type == "cuda":

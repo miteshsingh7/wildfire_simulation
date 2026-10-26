@@ -94,8 +94,8 @@ class SurrogateMultiTaskLoss(nn.Module):
     """Combined multi-task loss for surrogate training.
 
     Combines:
-    1. Pinball loss across tau in {0.1, 0.5, 0.9} on uncensored cells.
-    2. Quantile ordering constraint penalty.
+    1. Pinball loss across tau in {0.1, 0.5, 0.9} on uncensored cells (normalized by horizon_scale).
+    2. Quantile ordering constraint penalty (q10 <= q50 <= q90).
     3. Binary cross-entropy with logits for horizon burn probability.
     """
 
@@ -104,11 +104,13 @@ class SurrogateMultiTaskLoss(nn.Module):
         quantiles: tuple[float, float, float] = (0.1, 0.5, 0.9),
         lambda_order: float = 1.0,
         lambda_bce: float = 0.5,
+        horizon_scale: float = 720.0,
     ) -> None:
         super().__init__()
         self.quantiles = quantiles
         self.lambda_order = lambda_order
         self.lambda_bce = lambda_bce
+        self.horizon_scale = horizon_scale
 
         self.pinball_q10 = PinballLoss(quantiles[0])
         self.pinball_q50 = PinballLoss(quantiles[1])
@@ -119,35 +121,56 @@ class SurrogateMultiTaskLoss(nn.Module):
         self,
         pred_quantiles: torch.Tensor,
         pred_burn_logits: torch.Tensor,
-        target_arrival: torch.Tensor,
-        censor_mask: torch.Tensor,
+        target_arrival: torch.Tensor | None = None,
+        censor_mask: torch.Tensor | None = None,
+        target_quantiles: torch.Tensor | None = None,
+        censor_quantiles: torch.Tensor | None = None,
     ) -> LossBreakdown:
         """Forward loss calculation.
 
         Args:
-            pred_quantiles: (B, 3, H, W) -> [q10, q50, q90]
+            pred_quantiles: (B, 3, H, W) -> [q10, q50, q90] in raw minutes
             pred_burn_logits: (B, 1, H, W)
-            target_arrival: (B, H, W)
-            censor_mask: (B, H, W) where 1 indicates unburned/censored, 0 indicates burned.
+            target_arrival: (B, H, W) median arrival time in raw minutes (optional fallback)
+            censor_mask: (B, H, W) median censor mask {0, 1} (optional fallback)
+            target_quantiles: (B, 3, H, W) arrival times in minutes per quantile [q10, q50, q90]
+            censor_quantiles: (B, 3, H, W) censor masks per quantile (1=censored, 0=burned)
 
         Returns:
             LossBreakdown with individual and total loss scalars.
         """
-        # Uncensored mask: 1 for burned cells, 0 for censored
-        uncensored_mask = (1.0 - censor_mask).clamp(0.0, 1.0)
+        # Normalize predictions to [0, 1] scale by dividing by horizon_scale (720.0)
+        pred_norm = pred_quantiles / self.horizon_scale
 
-        # 1. Pinball losses
-        l_q10 = self.pinball_q10(pred_quantiles[:, 0, :, :], target_arrival, uncensored_mask)
-        l_q50 = self.pinball_q50(pred_quantiles[:, 1, :, :], target_arrival, uncensored_mask)
-        l_q90 = self.pinball_q90(pred_quantiles[:, 2, :, :], target_arrival, uncensored_mask)
+        if target_quantiles is not None and censor_quantiles is not None:
+            # Per-quantile targets and masks
+            t_norm = target_quantiles / self.horizon_scale
+            mask_q = (1.0 - censor_quantiles).clamp(0.0, 1.0)
+
+            l_q10 = self.pinball_q10(pred_norm[:, 0, :, :], t_norm[:, 0, :, :], mask_q[:, 0, :, :])
+            l_q50 = self.pinball_q50(pred_norm[:, 1, :, :], t_norm[:, 1, :, :], mask_q[:, 1, :, :])
+            l_q90 = self.pinball_q90(pred_norm[:, 2, :, :], t_norm[:, 2, :, :], mask_q[:, 2, :, :])
+
+            # Target for horizon burn: burned at median (q50) by horizon
+            target_burned = mask_q[:, 1, :, :].unsqueeze(1)
+        else:
+            if target_arrival is None or censor_mask is None:
+                raise ValueError("Must provide either (target_quantiles, censor_quantiles) or (target_arrival, censor_mask)")
+            t_norm = target_arrival / self.horizon_scale
+            uncensored_mask = (1.0 - censor_mask).clamp(0.0, 1.0)
+
+            l_q10 = self.pinball_q10(pred_norm[:, 0, :, :], t_norm, uncensored_mask)
+            l_q50 = self.pinball_q50(pred_norm[:, 1, :, :], t_norm, uncensored_mask)
+            l_q90 = self.pinball_q90(pred_norm[:, 2, :, :], t_norm, uncensored_mask)
+
+            target_burned = uncensored_mask.unsqueeze(1)
+
         pinball_total = (l_q10 + l_q50 + l_q90) / 3.0
 
-        # 2. Non-crossing quantile ordering constraint
-        l_order = self.ordering_loss_fn(pred_quantiles)
+        # 2. Non-crossing quantile ordering constraint (evaluated on normalized scale)
+        l_order = self.ordering_loss_fn(pred_norm)
 
         # 3. Burn classification loss (BCEWithLogits)
-        # Target: 1 if burned by horizon, 0 if censored
-        target_burned = uncensored_mask.unsqueeze(1)  # (B, 1, H, W)
         l_bce = F.binary_cross_entropy_with_logits(pred_burn_logits, target_burned)
 
         # Combined total loss

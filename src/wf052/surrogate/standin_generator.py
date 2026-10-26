@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import os
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -1152,6 +1153,10 @@ def generate_stratified_samples_rejection(
     scenarios_config_path: str | Path = "configs/scenarios.yaml",
     teacher_config_path: str | Path | None = None,
     device: torch.device | None = None,
+    fires_base_dir: str | Path = "data/tiles/fires",
+    max_attempts_per_bin: int | None = None,
+    max_wall_sec: float | None = None,
+    progress_interval: int = 5,
 ) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
     """Generate training samples using rejection sampling against burned-fraction bin quotas.
 
@@ -1260,7 +1265,7 @@ def generate_stratified_samples_rejection(
                 "asp_sin": asp_sin,
                 "asp_cos": asp_cos,
                 "elev_z": elev_z,
-                "fire_dir": Path("data/tiles/fires") / fire,
+                "fire_dir": Path(fires_base_dir) / fire,
             }
         )
 
@@ -1269,9 +1274,15 @@ def generate_stratified_samples_rejection(
     bin_generated: list[int] = [0, 0, 0, 0]
     bin_rejected: list[int] = [0, 0, 0, 0]
 
+    t0_rejection = time.perf_counter()
+    last_progress_count = 0
+    attempt_durations: list[float] = []
+
     for attempt in range(max_attempts):
         if all(len(bin_accepted[b]) >= quotas[b] for b in range(4) if quotas[b] > 0):
             break
+
+        t_att0 = time.perf_counter()
 
         f_idx = attempt % len(cached_fires)
         f_info = cached_fires[f_idx]
@@ -1412,6 +1423,46 @@ def generate_stratified_samples_rejection(
             accepted_samples.append(sample)
         else:
             bin_rejected[bin_idx] += 1
+
+        att_dur = time.perf_counter() - t_att0
+        attempt_durations.append(att_dur)
+
+        # Progress reporting every progress_interval accepted samples
+        if progress_interval > 0 and len(accepted_samples) >= last_progress_count + progress_interval:
+            last_progress_count = (len(accepted_samples) // progress_interval) * progress_interval
+            avg_sec = float(np.mean(attempt_durations[-progress_interval:])) if attempt_durations else 0.0
+            elapsed_cur = time.perf_counter() - t0_rejection
+            print(
+                f"[Progress] Accepted: {len(accepted_samples)}/{sum(quotas)} | "
+                f"Attempts per bin: {bin_generated} | Rejections: {bin_rejected} | "
+                f"Sec/attempt: {avg_sec:.2f} s | Elapsed: {elapsed_cur:.1f} s",
+                flush=True,
+            )
+
+        # Check wall-clock cap
+        if max_wall_sec is not None and (time.perf_counter() - t0_rejection) >= max_wall_sec:
+            logger.warning(
+                "Wall-clock cap of %.1f s reached in generate_stratified_samples_rejection (%d attempts).",
+                max_wall_sec,
+                attempt + 1,
+            )
+            print(f"Wall-clock cap of {max_wall_sec/60.0:.1f} minutes reached. Stopping search cleanly.", flush=True)
+            break
+
+        # Check per-bin attempt cap
+        if max_attempts_per_bin is not None:
+            unfilled_bins = [b for b in range(4) if len(bin_accepted[b]) < quotas[b] and quotas[b] > 0]
+            if any(bin_generated[b] >= max_attempts_per_bin for b in unfilled_bins):
+                logger.warning(
+                    "Per-bin attempt cap of %d reached for unfilled bin(s) %s.",
+                    max_attempts_per_bin,
+                    unfilled_bins,
+                )
+                print(
+                    f"Per-bin attempt cap of {max_attempts_per_bin} reached for unfilled bin(s). Stopping search cleanly.",
+                    flush=True,
+                )
+                break
 
     stats: list[BinRejectionStats] = []
     unfilled_messages: list[str] = []
