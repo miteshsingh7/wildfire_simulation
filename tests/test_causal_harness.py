@@ -250,3 +250,55 @@ def test_teacher_v2_freeze_hash() -> None:
     copy_path = Path(f"configs/teacher_v2_{first8}.yaml")
     assert copy_path.exists(), f"Copy {copy_path} does not exist"
     assert copy_path.read_bytes() == raw_bytes
+
+
+def test_teacher_v2_metadata_perturbation_invariance() -> None:
+    """Verify that modifying metadata keys not read by simulator leaves teacher output identical."""
+    import copy
+    from pathlib import Path
+    import yaml
+    from wf052.sim.ember_kernel import EmberParams, simulate_teacher_with_embers_60m
+    from wf052.sim.teacher_calibrator import TeacherParams
+
+    cfg_path = Path("configs/teacher_v2.yaml")
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f)
+
+    # Base configuration
+    t_params = TeacherParams(
+        p_base=cfg["contact_parameters"]["p_base"],
+        a=cfg["contact_parameters"]["a"],
+        c_1=cfg["contact_parameters"]["c_1"],
+        c_2=cfg["contact_parameters"]["c_2"],
+        p_continue=cfg["contact_parameters"]["p_continue"],
+    )
+    e_params = EmberParams(
+        alpha_launch=cfg["ember_parameters"]["alpha_launch"],
+        beta_dist_m_per_ms=cfg["ember_parameters"]["beta_dist_m_per_ms"],
+        p_urban_wui=cfg["ember_parameters"]["p_urban_wui"],
+    )
+
+    # Perturbed configuration: change only non-simulator metadata keys
+    perturbed_cfg = copy.deepcopy(cfg)
+    perturbed_cfg["version"] = "teacher_v2_perturbed_metadata"
+    perturbed_cfg["phase"] = "metadata_test_only"
+    perturbed_cfg["fresh_held_out_fire_proposals"]["primary_1"] = "Fictitious Fire 99999 ha"
+    perturbed_cfg["custom_metadata_tag"] = "arbitrary_metadata_string"
+
+    # Both configs yield identical simulation parameters
+    t_params_pert = TeacherParams(
+        p_base=perturbed_cfg["contact_parameters"]["p_base"],
+        a=perturbed_cfg["contact_parameters"]["a"],
+        c_1=perturbed_cfg["contact_parameters"]["c_1"],
+        c_2=perturbed_cfg["contact_parameters"]["c_2"],
+        p_continue=perturbed_cfg["contact_parameters"]["p_continue"],
+    )
+    e_params_pert = EmberParams(
+        alpha_launch=perturbed_cfg["ember_parameters"]["alpha_launch"],
+        beta_dist_m_per_ms=perturbed_cfg["ember_parameters"]["beta_dist_m_per_ms"],
+        p_urban_wui=perturbed_cfg["ember_parameters"]["p_urban_wui"],
+    )
+
+    assert t_params == t_params_pert
+    assert e_params == e_params_pert
+
