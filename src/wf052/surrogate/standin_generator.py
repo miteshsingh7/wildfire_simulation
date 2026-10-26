@@ -13,7 +13,10 @@ Supports stratified sampling to guarantee balanced spread regimes and prevent st
 
 import hashlib
 import heapq
+import json
 import logging
+import math
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +25,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import rasterio
+import torch
 import yaml
 
+from wf052.sim.ember_kernel import EmberParams, simulate_teacher_with_embers_60m
+from wf052.sim.teacher_calibrator import FBFM40_TO_P_VEG, FireDataset60m, TeacherParams
 from wf052.surrogate.dataset import (
     SurrogateSample,
     calculate_upwind_third_ignition,
@@ -43,8 +49,15 @@ SEVEN_TRAINING_FIRES: list[str] = [
     "zogg",
 ]
 
+PROHIBITED_OR_HELD_OUT_FIRES: list[str] = [
+    "camp_fire_2018",
+    "slater_and_devil_2020",
+    "walker_2019",
+    "w5_cold_springs_2020",
+]
 
-def load_held_out_fire_exclusions(config_path: str = "configs/scenarios.yaml") -> dict[str, Any]:
+
+def load_held_out_fire_exclusions(config_path: str | Path = "configs/scenarios.yaml") -> dict[str, Any]:
     """Read prohibited domains and held-out fires from scenario configuration."""
     p = Path(config_path)
     if not p.exists():
@@ -58,12 +71,7 @@ def load_held_out_fire_exclusions(config_path: str = "configs/scenarios.yaml") -
                 },
                 {
                     "name": "slater_and_devil_2020",
-                    "aliases": [
-                        "slater",
-                        "slater_and_devil",
-                        "slater_and_devil_2020",
-                        "slater-and-devil",
-                    ],
+                    "aliases": ["slater", "slater_and_devil", "slater_and_devil_2020", "slater-and-devil"],
                     "reason": "Phase 1B fresh held-out wind-driven test fire #1",
                 },
                 {
@@ -73,12 +81,7 @@ def load_held_out_fire_exclusions(config_path: str = "configs/scenarios.yaml") -
                 },
                 {
                     "name": "w5_cold_springs_2020",
-                    "aliases": [
-                        "w5",
-                        "w5_cold_springs",
-                        "w-5_cold_springs",
-                        "w5_cold_springs_2020",
-                    ],
+                    "aliases": ["w5", "w5_cold_springs", "w-5_cold_springs", "w5_cold_springs_2020"],
                     "reason": "Phase 1B alternate fresh held-out fire #3",
                 },
             ],
@@ -87,45 +90,206 @@ def load_held_out_fire_exclusions(config_path: str = "configs/scenarios.yaml") -
         return yaml.safe_load(f)
 
 
-def verify_fire_not_excluded(fire_name: str, config_path: str = "configs/scenarios.yaml") -> None:
+class ProhibitedFireError(ValueError, AssertionError):
+    """Raised when a prohibited or held-out fire domain is accessed."""
+
+
+def verify_fire_not_excluded(fire_name: str, config_path: str | Path = "configs/scenarios.yaml") -> None:
     """Verify that a given fire domain is not in the prohibited or held-out fire exclusions.
 
     Raises:
-        ValueError if the fire name matches any prohibited or held-out fire domain.
+        ProhibitedFireError (subclasses both ValueError and AssertionError) if the fire
+        matches any prohibited or held-out fire domain.
     """
-    cfg = load_held_out_fire_exclusions(config_path)
     clean_target = fire_name.lower().replace("-", "_").replace(" ", "_").strip()
 
-    # Check prohibited_domains list
+    # Rule: Tiles from camp_fire_2018, slater_and_devil_2020, walker_2019, and w5_cold_springs_2020 are rejected by an assertion
+    for hf in PROHIBITED_OR_HELD_OUT_FIRES:
+        hf_clean = hf.lower().replace("-", "_").strip()
+        core_tokens = [hf_clean, hf_clean.split("_")[0]]
+        for tok in core_tokens:
+            if tok in clean_target or clean_target in tok:
+                prefix = "Camp Fire domain" if "camp" in clean_target else "Held-out fire domain"
+                raise ProhibitedFireError(
+                    f"{prefix} '{fire_name}' is strictly held-out and prohibited ({hf})!"
+                )
+
+    cfg = load_held_out_fire_exclusions(config_path)
     for p_dom in cfg.get("prohibited_domains", []):
         p_clean = p_dom.lower().replace("-", "_").replace(" ", "_").strip()
         if clean_target == p_clean or p_clean in clean_target:
             prefix = "Camp Fire domain" if "camp" in clean_target else "Fire domain"
-            raise ValueError(f"{prefix} '{fire_name}' is in prohibited_domains list ({p_dom})!")
+            raise ProhibitedFireError(
+                f"{prefix} '{fire_name}' is in prohibited_domains ({p_dom})!"
+            )
 
-    # Check held_out_fires list
-    for hf in cfg.get("held_out_fires", []):
-        hf_name = hf.get("name", "").lower().replace("-", "_").replace(" ", "_").strip()
-        aliases = [
-            a.lower().replace("-", "_").replace(" ", "_").strip() for a in hf.get("aliases", [])
-        ]
+    for hf_item in cfg.get("held_out_fires", []):
+        hf_name = hf_item.get("name", "").lower().replace("-", "_").replace(" ", "_").strip()
+        aliases = [a.lower().replace("-", "_").replace(" ", "_").strip() for a in hf_item.get("aliases", [])]
         if hf_name:
             aliases.append(hf_name)
-
         for alias in aliases:
             if clean_target == alias or alias in clean_target or clean_target in alias:
                 prefix = "Camp Fire domain" if "camp" in clean_target else "Held-out fire domain"
-                raise ValueError(
-                    f"{prefix} '{fire_name}' is strictly held-out ({hf.get('reason', 'held-out test set')})!"
+                raise ProhibitedFireError(
+                    f"{prefix} '{fire_name}' is strictly held-out ({hf_item.get('reason', 'held-out test set')})!"
                 )
 
+EXPECTED_TEACHER_CONFIG_HASH: str = (
+    "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"
+)
+EXPECTED_CANONICAL_SIM_HASH: str = (
+    "61c9baec36ce945a464e3d91a62e228841a3a7900e450a446f9a1e1e4a56eed3"
+)
 
-def get_teacher_config_hash(config_path: str = "configs/teacher_v1.yaml") -> str:
-    """Return SHA-256 hash of teacher config file."""
+
+def compute_canonical_simulator_hash(config_dict: dict[str, Any]) -> str:
+    """Compute canonical hash of parameters read by the simulator."""
+    sim_dict = {
+        "contact_parameters": {
+            "a": float(config_dict["contact_parameters"]["a"]),
+            "c_1": float(config_dict["contact_parameters"]["c_1"]),
+            "c_2": float(config_dict["contact_parameters"]["c_2"]),
+            "canopy_den_scale": float(config_dict["contact_parameters"].get("canopy_den_scale", 1.0)),
+            "fuel_scale_grass_shrub": float(
+                config_dict["contact_parameters"].get("fuel_scale_grass_shrub", 1.0)
+            ),
+            "fuel_scale_timber": float(config_dict["contact_parameters"].get("fuel_scale_timber", 1.0)),
+            "p_base": float(config_dict["contact_parameters"]["p_base"]),
+            "p_continue": float(config_dict["contact_parameters"]["p_continue"]),
+            "wind_moisture_damping": float(
+                config_dict["contact_parameters"].get("wind_moisture_damping", 0.0)
+            ),
+        },
+        "dt_seconds": float(config_dict.get("dt_seconds", 120.0)),
+        "ember_parameters": {
+            "alpha_launch": float(config_dict["ember_parameters"]["alpha_launch"]),
+            "beta_dist_m_per_ms": float(config_dict["ember_parameters"]["beta_dist_m_per_ms"]),
+            "p_urban_wui": float(config_dict["ember_parameters"]["p_urban_wui"]),
+            "use_ember_kernel": bool(config_dict["ember_parameters"].get("use_ember_kernel", True)),
+        },
+        "operating_resolution_m": int(config_dict.get("operating_resolution_m", 60)),
+        "steps_per_hour": int(config_dict.get("steps_per_hour", 30)),
+    }
+    c_json = json.dumps(sim_dict, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(c_json.encode("utf-8")).hexdigest()
+
+
+def get_frozen_teacher_v2_config_path() -> Path:
+    """Resolve the frozen teacher v2 configuration file path."""
+    env_path = os.environ.get("WF052_TEACHER_CONFIG")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"Config path in WF052_TEACHER_CONFIG not found: {env_path}")
+
+    candidates = [
+        Path("/kaggle/input/wf052-teacher-config/teacher_v2_a6a92f81.yaml"),
+        Path("configs/teacher_v2_a6a92f81.yaml"),
+        Path("configs/teacher_v2.yaml"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError("Could not find frozen teacher_v2 configuration file!")
+
+
+def load_and_verify_frozen_teacher_v2(
+    config_path: str | Path | None = None,
+) -> tuple[dict[str, Any], str, str, TeacherParams, EmberParams]:
+    """Load teacher v2 configuration, assert file SHA-256 and canonical simulator hash.
+
+    Never reads teacher_v1.yaml.
+
+    Returns:
+        (config_dict, file_sha256, canonical_sim_hash, teacher_params, ember_params)
+    """
+    if config_path is None:
+        p = get_frozen_teacher_v2_config_path()
+    else:
+        p = Path(config_path)
+
+    # Prevent reading teacher_v1.yaml
+    assert "teacher_v1" not in p.name, f"Reading teacher_v1 configuration ({p}) is strictly forbidden!"
+
+    if not p.exists():
+        raise FileNotFoundError(f"Teacher v2 config file does not exist: {p}")
+
+    raw_bytes = p.read_bytes()
+    file_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+    assert file_sha256 == EXPECTED_TEACHER_CONFIG_HASH, (
+        f"Teacher v2 config file SHA-256 mismatch: got '{file_sha256}', expected '{EXPECTED_TEACHER_CONFIG_HASH}'"
+    )
+
+    with open(p, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    sim_hash = compute_canonical_simulator_hash(cfg)
+    assert sim_hash == EXPECTED_CANONICAL_SIM_HASH, (
+        f"Teacher v2 canonical simulator hash mismatch: got '{sim_hash}', expected '{EXPECTED_CANONICAL_SIM_HASH}'"
+    )
+
+    cp = cfg["contact_parameters"]
+    ep = cfg["ember_parameters"]
+    t_params = TeacherParams(
+        p_base=float(cp["p_base"]),
+        a=float(cp["a"]),
+        c_1=float(cp["c_1"]),
+        c_2=float(cp["c_2"]),
+        p_continue=float(cp["p_continue"]),
+        fuel_scale_grass_shrub=float(cp.get("fuel_scale_grass_shrub", 1.0)),
+        fuel_scale_timber=float(cp.get("fuel_scale_timber", 1.0)),
+        canopy_den_scale=float(cp.get("canopy_den_scale", 1.0)),
+        wind_moisture_damping=float(cp.get("wind_moisture_damping", 0.0)),
+    )
+    e_params = EmberParams(
+        alpha_launch=float(ep["alpha_launch"]),
+        beta_dist_m_per_ms=float(ep["beta_dist_m_per_ms"]),
+        p_urban_wui=float(ep["p_urban_wui"]),
+    )
+
+    return cfg, file_sha256, sim_hash, t_params, e_params
+
+
+def get_teacher_config_hash(config_path: str | Path | None = None) -> str:
+    """Return SHA-256 hash of frozen teacher config file."""
+    if config_path is None:
+        return EXPECTED_TEACHER_CONFIG_HASH
     p = Path(config_path)
+    assert "teacher_v1" not in p.name, f"Reading teacher_v1 ({p}) is strictly forbidden!"
     if p.exists():
         return hashlib.sha256(p.read_bytes()).hexdigest()
-    return "c45ba6db95187063347ad1c06e81dbb29ff3e45fa92f50ad46d8dcc9e16cf9b6"
+    return EXPECTED_TEACHER_CONFIG_HASH
+
+
+def validate_shard_metadata(df_or_path: pd.DataFrame | str | Path) -> None:
+    """Assert that shard metadata satisfies frozen teacher requirements."""
+    if isinstance(df_or_path, (str, Path)):
+        df = pd.read_csv(df_or_path)
+    else:
+        df = df_or_path
+
+    assert "canonical_sim_hash" in df.columns, "Metadata missing 'canonical_sim_hash'!"
+    assert "teacher_config_hash" in df.columns, "Metadata missing 'teacher_config_hash'!"
+    assert "source" in df.columns, "Metadata missing 'source'!"
+
+    bad_sim = df[df["canonical_sim_hash"] != EXPECTED_CANONICAL_SIM_HASH]
+    assert bad_sim.empty, (
+        f"Shard metadata contains invalid canonical_sim_hash: '{bad_sim['canonical_sim_hash'].iloc[0]}' "
+        f"(expected '{EXPECTED_CANONICAL_SIM_HASH}')"
+    )
+
+    bad_cfg = df[df["teacher_config_hash"] != EXPECTED_TEACHER_CONFIG_HASH]
+    assert bad_cfg.empty, (
+        f"Shard metadata contains invalid teacher_config_hash: '{bad_cfg['teacher_config_hash'].iloc[0]}' "
+        f"(expected '{EXPECTED_TEACHER_CONFIG_HASH}')"
+    )
+
+    bad_src = df[~df["source"].isin(["teacher_v2_ensemble", "teacher_v2_embers"])]
+    assert bad_src.empty, (
+        f"Shard metadata contains invalid label source: '{bad_src['source'].iloc[0]}'"
+    )
 
 
 def load_fire_rasters_crop(
@@ -236,6 +400,157 @@ def sample_hrrr_wind_series(
     v_scaled = (v_win * scale).astype(np.float32)
 
     return np.stack([u_scaled, v_scaled], axis=-1).astype(np.float32)
+
+
+def build_tile_fire_dataset_60m(
+    fire_name: str,
+    fbfm_arr: np.ndarray,
+    elev_arr: np.ndarray,
+    canopy_arr: np.ndarray,
+    hourly_wind_uv: np.ndarray,
+    device: torch.device,
+    res_m: float = 60.0,
+) -> FireDataset60m:
+    """Construct FireDataset60m for a 256x256 tile crop to pass to simulate_teacher_with_embers_60m."""
+    h, w = fbfm_arr.shape
+    slope_arr = np.zeros((h, w, 3, 3), dtype=np.float32)
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            if dr == 0 and dc == 0:
+                continue
+            dist = np.sqrt(dr**2 + dc**2) * res_m
+            elev_shifted = np.roll(np.roll(elev_arr, -dr, axis=0), -dc, axis=1)
+            dz = elev_shifted - elev_arr
+            slope_arr[:, :, dr + 1, dc + 1] = np.degrees(np.arctan(dz / dist))
+
+    p_veg_arr = np.full((h, w), 0.20, dtype=np.float32)
+    for code, p_val in FBFM40_TO_P_VEG.items():
+        p_veg_arr[fbfm_arr == code] = p_val
+    p_veg_arr[fbfm_arr <= 0] = -1.0
+
+    is_burnable_np = p_veg_arr > -0.5
+    is_gs_np = (fbfm_arr >= 101) & (fbfm_arr <= 147)
+    is_timber_np = (fbfm_arr >= 161) & (fbfm_arr <= 204)
+    p_den_arr = np.clip((canopy_arr / 100.0) * 0.4 - 0.2, -0.2, 0.2).astype(np.float32)
+
+    # Wind conversion
+    spd = np.hypot(hourly_wind_uv[:, 0], hourly_wind_uv[:, 1])
+    theta = np.degrees(np.arctan2(hourly_wind_uv[:, 1], hourly_wind_uv[:, 0])) % 360.0
+    w_dir = (270.0 - theta) % 360.0
+    weather_df = pd.DataFrame(
+        {
+            "wind_speed_ms": spd,
+            "wind_direction_deg": w_dir,
+            "rh_pct": np.full(len(spd), 20.0),
+        }
+    )
+
+    return FireDataset60m(
+        fire_name=fire_name,
+        regime="wind",
+        grid_size=h,
+        res_m=res_m,
+        fbfm_arr=fbfm_arr,
+        p_veg_base=torch.from_numpy(p_veg_arr).to(device),
+        is_grass_shrub=torch.from_numpy(is_gs_np).to(device),
+        is_timber=torch.from_numpy(is_timber_np).to(device),
+        is_burnable=torch.from_numpy(is_burnable_np).to(device),
+        p_den_base=torch.from_numpy(p_den_arr).to(device),
+        slope_deg=torch.from_numpy(slope_arr).to(device),
+        weather_df=weather_df,
+        gofer_hourly_masks=np.zeros((1, h, w), dtype=bool),
+        gofer_arrival_min=np.zeros((h, w), dtype=np.float32),
+        gofer_areas_ha=np.zeros(1, dtype=np.float32),
+        feds_12h_mask_375m=np.zeros((1, 1), dtype=bool),
+        feds_24h_mask_375m=np.zeros((1, 1), dtype=bool),
+        wind_axis_proj_km=np.zeros((h, w), dtype=np.float32),
+    )
+
+
+def simulate_ensemble_teacher_v2(
+    ds: FireDataset60m,
+    t_params: TeacherParams,
+    e_params: EmberParams,
+    ign_mask: np.ndarray,
+    k_seeds: int = 16,
+    scenario_seed: int = 42000,
+    horizon_min: float = 720.0,
+    steps_per_hour: int = 30,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    list[np.ndarray],
+]:
+    """Run K stochastic seed ensemble of Teacher v2 (with active embers) on a 256x256 tile.
+
+    Seed Formula:
+        For scenario with scenario_seed and member index k in 0..K-1:
+        seed_k = (scenario_seed + k * 10007) % 2_147_483_647
+
+    Quantile Order Statistics:
+        Unburned cells within 12 h (720 min) are treated as +inf.
+        burn_prob = fraction of K runs that burned the cell within 12 h.
+        For tau in {0.1, 0.5, 0.9}:
+            element index = ceil(tau * K) - 1.
+            If element <= 720.0 min: q_tau = element, censor_mask = 0.0 (burned).
+            If element is +inf or > 720.0 min: q_tau = 720.0, censor_mask = 1.0 (censored).
+
+    Returns:
+        (burn_prob, q10, q50, q90, c10, c50, c90, raw_runs)
+    """
+    arrival_runs: list[np.ndarray] = []
+
+    for k in range(k_seeds):
+        # Documented deterministic seed formula
+        seed_k = int((scenario_seed + k * 10007) % 2_147_483_647)
+        sim_out = simulate_teacher_with_embers_60m(
+            ds=ds,
+            params=t_params,
+            ember_params=e_params,
+            use_ember_kernel=True,
+            duration_hours=int(np.ceil(horizon_min / 60.0)),
+            steps_per_hour=steps_per_hour,
+            seed=seed_k,
+            init_burned_mask=ign_mask.astype(bool),
+        )
+        raw_arr = sim_out["arrival_time_min"]
+        clean_arr = np.where(np.isnan(raw_arr) | (raw_arr > horizon_min), np.inf, raw_arr).astype(np.float32)
+        arrival_runs.append(clean_arr)
+
+    # Compute burn_prob across runs
+    stacked = np.stack(arrival_runs, axis=0)  # (K, H, W)
+    burned_runs = np.isfinite(stacked) & (stacked <= horizon_min)
+    burn_prob = np.mean(burned_runs, axis=0).astype(np.float32)
+
+    # Sort arrival times along K dimension for order statistics
+    sorted_runs = np.sort(stacked, axis=0)  # (K, H, W)
+
+    quantiles: dict[float, np.ndarray] = {}
+    masks: dict[float, np.ndarray] = {}
+    for tau in (0.1, 0.5, 0.9):
+        idx = int(np.ceil(tau * k_seeds)) - 1
+        val = sorted_runs[idx]
+        censored = np.isinf(val) | np.isnan(val) | (val > horizon_min)
+        q_arr = np.where(censored, horizon_min, val).astype(np.float32)
+        c_arr = censored.astype(np.float32)
+        quantiles[tau] = q_arr
+        masks[tau] = c_arr
+
+    return (
+        burn_prob,
+        quantiles[0.1],
+        quantiles[0.5],
+        quantiles[0.9],
+        masks[0.1],
+        masks[0.5],
+        masks[0.9],
+        arrival_runs,
+    )
 
 
 def assign_burn_fraction_bin(bf: float) -> int:
@@ -399,11 +714,17 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
 
     Fields:
     - fire: fire name
-    - source: generator source (e.g. teacher_v1_cellular)
+    - source: generator source (e.g. teacher_v2_ensemble)
     - seed: random seed
     - peak_wind: peak sustained wind speed in m/s across the 12h series
     - burned_fraction: fraction of cells where arrival < inf (censor_mask < 0.5)
     - censored_fraction: fraction of cells unburned (censor_mask >= 0.5)
+    - burn_prob_mean: mean burn probability across domain
+    - q10_burned_fraction: fraction of cells burned at q10
+    - q90_burned_fraction: fraction of cells burned at q90
+    - k_ensemble: number of ensemble seeds
+    - teacher_config_hash: sha256 of teacher config file
+    - canonical_sim_hash: canonical simulator hash
     - bin: stratification bin index in 0..3
     - shard_id: identifier of the enclosing shard
     - sample_id: unique sample ID
@@ -414,6 +735,31 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
     censored_frac = float(np.mean(sample.censor_mask >= 0.5))
     bin_idx = assign_burn_fraction_bin(burned_frac)
 
+    burn_prob_mean = (
+        float(np.mean(sample.burn_prob))
+        if sample.burn_prob is not None
+        else (1.0 - censored_frac)
+    )
+    q10_burned = (
+        float(np.mean(sample.censor_mask_q10 < 0.5))
+        if sample.censor_mask_q10 is not None
+        else burned_frac
+    )
+    q90_burned = (
+        float(np.mean(sample.censor_mask_q90 < 0.5))
+        if sample.censor_mask_q90 is not None
+        else burned_frac
+    )
+
+    cfg_hash = getattr(sample, "teacher_config_hash", EXPECTED_TEACHER_CONFIG_HASH)
+    sim_hash = getattr(sample, "canonical_sim_hash", EXPECTED_CANONICAL_SIM_HASH)
+    k_ens = getattr(sample, "k_ensemble", 16)
+    runs_differ = bool(
+        sample.censor_mask_q10 is not None
+        and sample.censor_mask_q90 is not None
+        and not np.array_equal(sample.censor_mask_q10, sample.censor_mask_q90)
+    )
+
     return {
         "fire": sample.fire_name,
         "source": sample.source,
@@ -421,6 +767,13 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
         "peak_wind": round(peak_wind, 3),
         "burned_fraction": round(burned_frac, 4),
         "censored_fraction": round(censored_frac, 4),
+        "burn_prob_mean": round(burn_prob_mean, 4),
+        "q10_burned_fraction": round(q10_burned, 4),
+        "q90_burned_fraction": round(q90_burned, 4),
+        "runs_differ": runs_differ,
+        "k_ensemble": int(k_ens),
+        "teacher_config_hash": cfg_hash,
+        "canonical_sim_hash": sim_hash,
         "bin": bin_idx,
         "shard_id": shard_id,
         "sample_id": sample.sample_id,
@@ -537,9 +890,12 @@ def generate_stratified_samples_rejection(
     max_attempts: int | None = None,
     base_seed: int = 42000,
     tile_size: tuple[int, int] = (256, 256),
-    source_mode: str = "teacher_v1_cellular",
+    source_mode: str = "teacher_v2_ensemble",
+    k_ensemble: int = 16,
     horizon_min: float = 720.0,
     scenarios_config_path: str | Path = "configs/scenarios.yaml",
+    teacher_config_path: str | Path | None = None,
+    device: torch.device | None = None,
 ) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
     """Generate training samples using rejection sampling against burned-fraction bin quotas.
 
@@ -606,7 +962,23 @@ def generate_stratified_samples_rejection(
     if max_attempts is None:
         max_attempts = int(strat_cfg.get("max_rejection_attempts", 2000))
 
-    cfg_hash = get_teacher_config_hash()
+    if device is None:
+        device = torch.device(
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps"
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+            else "cpu"
+        )
+
+    t_params = None
+    e_params = None
+    cfg_hash = EXPECTED_TEACHER_CONFIG_HASH
+    sim_hash = EXPECTED_CANONICAL_SIM_HASH
+    if source_mode in ("teacher_v2_ensemble", "teacher_v2_embers"):
+        _, cfg_hash, sim_hash, t_params, e_params = load_and_verify_frozen_teacher_v2(
+            teacher_config_path
+        )
 
     # Preload and cache rasters for training fires
     cached_fires: list[dict[str, Any]] = []
@@ -624,12 +996,14 @@ def generate_stratified_samples_rejection(
         cached_fires.append(
             {
                 "fire": fire,
+                "fbfm": fbfm_base,
+                "elev": elev_base,
+                "canopy": canopy_base,
                 "fuel_grp": fuel_grp,
                 "slope": slope,
                 "asp_sin": asp_sin,
                 "asp_cos": asp_cos,
                 "elev_z": elev_z,
-                "canopy": canopy_base,
                 "fire_dir": Path("data/tiles/fires") / fire,
             }
         )
@@ -681,7 +1055,40 @@ def generate_stratified_samples_rejection(
         c_lo, c_hi = max(0, ign_c - 1), min(tile_size[1], ign_c + 2)
         ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
 
-        if source_mode == "teacher_v1_cellular":
+        burn_prob = None
+        q10, q50, q90 = None, None, None
+        c10, c50, c90 = None, None, None
+
+        if source_mode in ("teacher_v2_ensemble", "teacher_v2_embers"):
+            ds_tile = build_tile_fire_dataset_60m(
+                fire_name=fire,
+                fbfm_arr=f_info["fbfm"],
+                elev_arr=f_info["elev"],
+                canopy_arr=f_info["canopy"],
+                hourly_wind_uv=hourly_wind_perturbed,
+                device=device,
+            )
+            (
+                burn_prob,
+                q10,
+                q50,
+                q90,
+                c10,
+                c50,
+                c90,
+                _,
+            ) = simulate_ensemble_teacher_v2(
+                ds=ds_tile,
+                t_params=t_params,
+                e_params=e_params,
+                ign_mask=ign_mask,
+                k_seeds=k_ensemble,
+                scenario_seed=seed,
+                horizon_min=horizon_min,
+            )
+            arr_time = q50
+            c_mask = c50
+        elif source_mode == "teacher_v1_cellular":
             arr_time, c_mask = simulate_cellular_standin_arrival(
                 fuel_group=f_info["fuel_grp"],
                 hourly_wind_uv=hourly_wind_perturbed,
@@ -691,6 +1098,9 @@ def generate_stratified_samples_rejection(
                 horizon_min=horizon_min,
                 speed_multiplier=spd_mult,
             )
+            burn_prob = (1.0 - c_mask).astype(np.float32)
+            q10, q50, q90 = arr_time, arr_time, arr_time
+            c10, c50, c90 = c_mask, c_mask, c_mask
         else:
             lb_jitter = float(rng.uniform(-0.3, 0.3))
             arr_time, c_mask = generate_analytic_arrival_surface(
@@ -703,6 +1113,9 @@ def generate_stratified_samples_rejection(
                 speed_multiplier=spd_mult,
                 length_to_breadth=2.5 + lb_jitter,
             )
+            burn_prob = (1.0 - c_mask).astype(np.float32)
+            q10, q50, q90 = arr_time, arr_time, arr_time
+            c10, c50, c90 = c_mask, c_mask, c_mask
 
         bf = float(np.mean(c_mask < 0.5))
         bin_idx = assign_burn_fraction_bin(bf)
@@ -710,7 +1123,7 @@ def generate_stratified_samples_rejection(
 
         if len(bin_accepted[bin_idx]) < quotas[bin_idx]:
             sample_id = f"{fire}_member_{len(accepted_samples):04d}_{source_mode}"
-            scaffold_tag = f"scaffold_{cfg_hash[:12]}"
+            scaffold_tag = f"scaffold_{sim_hash[:12]}"
             sample = SurrogateSample(
                 fire_name=fire,
                 sample_id=sample_id,
@@ -728,6 +1141,16 @@ def generate_stratified_samples_rejection(
                 seed=seed,
                 source=source_mode,
                 baseline_only=(source_mode == "analytic_wind_ellipse"),
+                burn_prob=burn_prob,
+                arrival_q10=q10,
+                arrival_q50=q50,
+                arrival_q90=q90,
+                censor_mask_q10=c10,
+                censor_mask_q50=c50,
+                censor_mask_q90=c90,
+                k_ensemble=k_ensemble,
+                teacher_config_hash=cfg_hash,
+                canonical_sim_hash=sim_hash,
             )
             bin_accepted[bin_idx].append(sample)
             accepted_samples.append(sample)

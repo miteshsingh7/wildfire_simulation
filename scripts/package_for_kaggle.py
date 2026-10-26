@@ -18,9 +18,11 @@ Prints byte sizes of each packaged folder.
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 SEVEN_TRAINING_FIRES: list[str] = [
@@ -50,6 +52,94 @@ REQUIRED_FIRE_FILES: list[str] = [
     "canopy_cover.tif",
     "hrrr_weather_hourly.parquet",
 ]
+
+
+EXPECTED_TEACHER_V2_HASH: str = (
+    "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"
+)
+
+
+def compute_file_sha256(file_path: Path) -> str:
+    """Calculate SHA-256 checksum of a file."""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_wf052_code_zip(repo_root: Path, zip_dest: Path) -> tuple[int, str]:
+    """Package code into wf052-code.zip excluding data, caches, .venv, checkpoints.
+
+    Returns:
+        (size_bytes, sha256_hash)
+    """
+    zip_dest.parent.mkdir(parents=True, exist_ok=True)
+    if zip_dest.exists():
+        zip_dest.unlink()
+
+    included_dirs = ["src", "configs", "scripts"]
+    included_files = ["pyproject.toml"]
+
+    with zipfile.ZipFile(zip_dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        for inc_dir in included_dirs:
+            base_p = repo_root / inc_dir
+            if not base_p.exists():
+                continue
+            for root, _, files in os.walk(base_p):
+                for f in sorted(files):
+                    fp = Path(root) / f
+                    rel_path = fp.relative_to(repo_root)
+                    str_rel = str(rel_path)
+                    # Filter out caches, compiled files, and hidden files
+                    if (
+                        "__pycache__" in str_rel
+                        or str_rel.endswith(".pyc")
+                        or ".pytest_cache" in str_rel
+                        or ".DS_Store" in str_rel
+                    ):
+                        continue
+                    zf.write(fp, arcname=str(rel_path))
+
+        for inc_f in included_files:
+            fp = repo_root / inc_f
+            if fp.exists():
+                zf.write(fp, arcname=inc_f)
+
+    size_bytes = zip_dest.stat().st_size
+    sha256_hash = compute_file_sha256(zip_dest)
+    return size_bytes, sha256_hash
+
+
+def build_wf052_teacher_config_dataset(repo_root: Path, out_dir: Path) -> tuple[Path, int, str]:
+    """Create out/wf052-teacher-config/ containing ONLY teacher_v2_a6a92f81.yaml.
+
+    Returns:
+        (target_file, file_size, sha256_hash)
+    """
+    target_dir = out_dir / "wf052-teacher-config"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    src_cfg = repo_root / "configs" / "teacher_v2.yaml"
+    assert src_cfg.exists(), f"teacher_v2.yaml missing at {src_cfg}!"
+
+    dest_cfg = target_dir / "teacher_v2_a6a92f81.yaml"
+    shutil.copy2(src_cfg, dest_cfg)
+
+    file_sha256 = compute_file_sha256(dest_cfg)
+    assert file_sha256 == EXPECTED_TEACHER_V2_HASH, (
+        f"Teacher config hash mismatch! Expected {EXPECTED_TEACHER_V2_HASH}, got {file_sha256}"
+    )
+
+    # Strictly assert ONLY this one file exists in the directory
+    dir_files = [p.name for p in target_dir.iterdir() if p.is_file()]
+    assert dir_files == ["teacher_v2_a6a92f81.yaml"], (
+        f"Directory must contain ONLY teacher_v2_a6a92f81.yaml! Found: {dir_files}"
+    )
+
+    return dest_cfg, dest_cfg.stat().st_size, file_sha256
 
 
 def compute_folder_size_bytes(folder_path: Path) -> int:
@@ -199,7 +289,54 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     output_dir = (repo_root / args.output_dir).resolve()
 
+    # 1. Build directory packages (wf052-code, wf052-tiles-train)
     build_kaggle_packages(repo_root, output_dir)
+
+    # 2. Build wf052-code.zip
+    print("\n[3/4] Building wf052-code.zip...")
+    zip_dest = repo_root / "wf052-code.zip"
+    zip_size, zip_sha = build_wf052_code_zip(repo_root, zip_dest)
+    # Also save a copy inside output_dir
+    shutil.copy2(zip_dest, output_dir / "wf052-code.zip")
+    print(f"wf052-code.zip path:    {zip_dest}")
+    print(f"wf052-code.zip size:    {format_bytes(zip_size)}")
+    print(f"wf052-code.zip SHA-256: {zip_sha}")
+
+    # 3. Build out/wf052-teacher-config/
+    print("\n[4/4] Building out/wf052-teacher-config/...")
+    out_dir = repo_root / "out"
+    teacher_cfg_file, cfg_size, cfg_sha = build_wf052_teacher_config_dataset(repo_root, out_dir)
+    # Also copy to output_dir
+    target_cfg_build = output_dir / "wf052-teacher-config"
+    if target_cfg_build.exists():
+        shutil.rmtree(target_cfg_build)
+    shutil.copytree(out_dir / "wf052-teacher-config", target_cfg_build)
+    print(f"Teacher config path:    {teacher_cfg_file}")
+    print(f"Teacher config size:    {format_bytes(cfg_size)}")
+    print(f"Teacher config SHA-256: {cfg_sha}")
+
+    # 4. Print file listings
+    print("\n" + "=" * 60)
+    print("STEP 5 Packaging Verification: File Listings & SHA-256")
+    print("=" * 60)
+    print(f"Archive: {zip_dest.name} ({format_bytes(zip_size)})")
+    print(f"  SHA-256: {zip_sha}")
+    with zipfile.ZipFile(zip_dest, "r") as zf:
+        infolist = zf.infolist()
+        print(f"  Total files in zip: {len(infolist)}")
+        sample_entries = [info.filename for info in infolist[:15]]
+        for se in sample_entries:
+            print(f"    - {se}")
+        if len(infolist) > 15:
+            print(f"    ... and {len(infolist) - 15} more files.")
+
+    print(f"\nDirectory: {out_dir / 'wf052-teacher-config'}")
+    for item in sorted((out_dir / "wf052-teacher-config").iterdir()):
+        sz = item.stat().st_size
+        sha = compute_file_sha256(item)
+        print(f"  - {item.name:<30} {format_bytes(sz):>15}  SHA-256: {sha}")
+    print("=" * 60)
+
     return 0
 
 

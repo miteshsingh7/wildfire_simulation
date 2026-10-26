@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -27,6 +28,11 @@ from wf052.surrogate.dataset import (
     SurrogateDataset,
     SurrogateSample,
     collate_surrogate_batch,
+)
+from wf052.surrogate.standin_generator import (
+    EXPECTED_CANONICAL_SIM_HASH,
+    EXPECTED_TEACHER_CONFIG_HASH,
+    validate_shard_metadata,
 )
 from wf052.surrogate.evaluation import (
     evaluate_model_on_samples,
@@ -95,9 +101,9 @@ class SurrogateTrainer:
         self.config = config or TrainConfig()
         set_reproducible_seed(self.config.seed)
 
-        # Strict training data constraint (Phase 2C):
-        # Training strictly uses teacher_v1 labels only.
-        # Ellipse samples are flagged baseline_only and rejected by the trainer.
+        # Strict training data constraint (Phase 2C & Phase 2D):
+        # 1. Ellipse samples are flagged baseline_only and rejected by the trainer.
+        # 2. Frozen teacher samples must match frozen hashes and teacher label sources.
         rejected = [
             s.sample_id
             for s in train_samples
@@ -107,8 +113,31 @@ class SurrogateTrainer:
         if rejected:
             raise ValueError(
                 f"SurrogateTrainer rejected {len(rejected)} sample(s) with baseline_only=True or "
-                f"source='analytic_wind_ellipse'. Training strictly requires teacher_v1 labels only. "
+                f"source='analytic_wind_ellipse'. Training strictly requires teacher_v1 or frozen teacher labels only. "
                 f"First rejected sample: '{rejected[0]}'."
+            )
+
+        # Enforce frozen teacher hashes and valid label sources
+        rejected_frozen = []
+        for s in train_samples:
+            src = getattr(s, "source", "")
+            cfg_h = getattr(s, "teacher_config_hash", None)
+            sim_h = getattr(s, "canonical_sim_hash", None)
+
+            # If sample specifies source outside recognized teacher sources
+            if src not in ("teacher_v2_ensemble", "teacher_v2_embers", "teacher_v1_cellular"):
+                rejected_frozen.append((s.sample_id, f"source='{src}' is not a recognized teacher source"))
+            elif src in ("teacher_v2_ensemble", "teacher_v2_embers"):
+                if cfg_h != EXPECTED_TEACHER_CONFIG_HASH:
+                    rejected_frozen.append((s.sample_id, f"teacher_config_hash='{cfg_h}' != '{EXPECTED_TEACHER_CONFIG_HASH}'"))
+                elif sim_h != EXPECTED_CANONICAL_SIM_HASH:
+                    rejected_frozen.append((s.sample_id, f"canonical_sim_hash='{sim_h}' != '{EXPECTED_CANONICAL_SIM_HASH}'"))
+
+        if rejected_frozen:
+            s_id, reason = rejected_frozen[0]
+            raise ValueError(
+                f"SurrogateTrainer rejected {len(rejected_frozen)} sample(s) whose hash differs or whose "
+                f"label source is not the frozen teacher. First rejection: '{s_id}' ({reason})."
             )
 
         if device is None:
@@ -157,6 +186,15 @@ class SurrogateTrainer:
 
         self.checkpoint_dir = Path(self.config.checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def validate_shard(cls, shard_metadata: pd.DataFrame | str | Path) -> None:
+        """Validate that a shard's metadata matches the frozen teacher hash and label source.
+
+        Raises:
+            AssertionError if hash differs or label source is not the frozen teacher.
+        """
+        validate_shard_metadata(shard_metadata)
 
     def train_epoch(self, epoch: int) -> dict[str, float]:
         """Train for one single epoch."""

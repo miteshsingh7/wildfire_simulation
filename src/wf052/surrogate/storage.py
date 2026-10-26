@@ -195,6 +195,9 @@ def save_compact_dataset(
         "scale_factor": scale_factor,
         "unique_fires": sorted(list(saved_fires)),
         "tile_shape": list(samples[0].fuel_group.shape),
+        "teacher_config_hash": getattr(samples[0], "teacher_config_hash", "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"),
+        "canonical_sim_hash": getattr(samples[0], "canonical_sim_hash", "61c9baec36ce945a464e3d91a62e228841a3a7900e450a446f9a1e1e4a56eed3"),
+        "source": getattr(samples[0], "source", "teacher_v2_ensemble"),
     }
     with open(out_path / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)

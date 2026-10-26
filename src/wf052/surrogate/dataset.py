@@ -120,14 +120,23 @@ class SurrogateSample:
     canopy_cover: np.ndarray  # (256, 256) float32 in [0, 1]
     ignition_mask: np.ndarray  # (256, 256) float32 {0, 1}
     hourly_wind_uv: np.ndarray  # (12, 2) float32
-    target_arrival_time: np.ndarray  # (256, 256) float32 in minutes
-    censor_mask: np.ndarray  # (256, 256) float32 {0, 1} (1=unburned/censored)
+    target_arrival_time: np.ndarray  # (256, 256) float32 in minutes (q50)
+    censor_mask: np.ndarray  # (256, 256) float32 {0, 1} (1=unburned/censored at q50)
     scaffold_tag: str  # Tag: "scaffold" + teacher_config_hash
     seed: int
-    source: str = (
-        "analytic_wind_ellipse"  # Source generator ("analytic_wind_ellipse", "teacher_v1_cellular")
-    )
+    source: str = "teacher_v2_ensemble"  # Source generator ("teacher_v2_ensemble", "teacher_v1_cellular", "analytic_wind_ellipse")
     baseline_only: bool = False  # Flag for baseline-only samples (e.g. analytic ellipse)
+    # Multi-seed ensemble attributes (Phase 2D)
+    burn_prob: np.ndarray | None = None
+    arrival_q10: np.ndarray | None = None
+    arrival_q50: np.ndarray | None = None
+    arrival_q90: np.ndarray | None = None
+    censor_mask_q10: np.ndarray | None = None
+    censor_mask_q50: np.ndarray | None = None
+    censor_mask_q90: np.ndarray | None = None
+    k_ensemble: int = 16
+    teacher_config_hash: str = "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"
+    canonical_sim_hash: str = "61c9baec36ce945a464e3d91a62e228841a3a7900e450a446f9a1e1e4a56eed3"
 
 
 @dataclass(frozen=True)
@@ -141,6 +150,9 @@ class SurrogateBatch:
     censor_mask: torch.Tensor  # (B, 256, 256) float32
     fire_names: list[str]
     sample_ids: list[str]
+    burn_prob: torch.Tensor | None = None
+    target_quantiles: torch.Tensor | None = None
+    censor_quantiles: torch.Tensor | None = None
 
     def to(self, device: torch.device) -> "SurrogateBatch":
         return SurrogateBatch(
@@ -151,6 +163,9 @@ class SurrogateBatch:
             censor_mask=self.censor_mask.to(device),
             fire_names=self.fire_names,
             sample_ids=self.sample_ids,
+            burn_prob=self.burn_prob.to(device) if self.burn_prob is not None else None,
+            target_quantiles=self.target_quantiles.to(device) if self.target_quantiles is not None else None,
+            censor_quantiles=self.censor_quantiles.to(device) if self.censor_quantiles is not None else None,
         )
 
 
@@ -188,7 +203,7 @@ class SurrogateDataset(Dataset):
         # Combined 13 spatial input channels
         spatial_inputs = torch.cat([fg_onehot, cont_channels], dim=0)
 
-        return {
+        item: dict[str, Any] = {
             "spatial_features": spatial_inputs,
             "fuel_group": fg_tensor,
             "wind_series": torch.from_numpy(s.hourly_wind_uv).float(),
@@ -197,6 +212,21 @@ class SurrogateDataset(Dataset):
             "fire_name": s.fire_name,
             "sample_id": s.sample_id,
         }
+
+        if s.burn_prob is not None:
+            item["burn_prob"] = torch.from_numpy(s.burn_prob).float()
+
+        if s.arrival_q10 is not None and s.arrival_q50 is not None and s.arrival_q90 is not None:
+            item["target_quantiles"] = torch.from_numpy(
+                np.stack([s.arrival_q10, s.arrival_q50, s.arrival_q90], axis=0)
+            ).float()
+
+        if s.censor_mask_q10 is not None and s.censor_mask_q50 is not None and s.censor_mask_q90 is not None:
+            item["censor_quantiles"] = torch.from_numpy(
+                np.stack([s.censor_mask_q10, s.censor_mask_q50, s.censor_mask_q90], axis=0)
+            ).float()
+
+        return item
 
 
 def collate_surrogate_batch(batch_list: list[dict[str, Any]]) -> SurrogateBatch:
@@ -209,6 +239,22 @@ def collate_surrogate_batch(batch_list: list[dict[str, Any]]) -> SurrogateBatch:
     f_names = [b["fire_name"] for b in batch_list]
     s_ids = [b["sample_id"] for b in batch_list]
 
+    burn_prob = (
+        torch.stack([b["burn_prob"] for b in batch_list], dim=0)
+        if "burn_prob" in batch_list[0]
+        else None
+    )
+    t_quantiles = (
+        torch.stack([b["target_quantiles"] for b in batch_list], dim=0)
+        if "target_quantiles" in batch_list[0]
+        else None
+    )
+    c_quantiles = (
+        torch.stack([b["censor_quantiles"] for b in batch_list], dim=0)
+        if "censor_quantiles" in batch_list[0]
+        else None
+    )
+
     return SurrogateBatch(
         spatial_features=spatial,
         fuel_group=fuel,
@@ -217,4 +263,7 @@ def collate_surrogate_batch(batch_list: list[dict[str, Any]]) -> SurrogateBatch:
         censor_mask=censor,
         fire_names=f_names,
         sample_ids=s_ids,
+        burn_prob=burn_prob,
+        target_quantiles=t_quantiles,
+        censor_quantiles=c_quantiles,
     )
