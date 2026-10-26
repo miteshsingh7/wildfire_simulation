@@ -16,6 +16,19 @@ domain:
   horizon_minutes: 720.0          # 720 minutes maximum arrival time
   crs: "EPSG:32610"
 
+# Fire-level dataset splits (Phase 2E)
+splits:
+  train:
+    - "kincade"
+    - "glass"
+    - "zogg"
+    - "creek"
+  val:
+    - "bobcat"
+  test:
+    - "caldor"
+    - "tamarack"
+
 training_fires:
   - name: "bobcat"
     tile_dir: "data/tiles/fires/bobcat"

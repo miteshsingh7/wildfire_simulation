@@ -25,6 +25,9 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 from wf052.surrogate.dataset import (
+    CompactSurrogateDataset,
+    FIRE_SPLITS,
+    SCHEMA_VERSION,
     SurrogateDataset,
     SurrogateSample,
     collate_surrogate_batch,
@@ -93,52 +96,84 @@ class SurrogateTrainer:
     def __init__(
         self,
         model: WindConditionedUNet,
-        train_samples: list[SurrogateSample],
-        val_samples: list[SurrogateSample],
+        train_samples: Sequence[SurrogateSample] | torch.utils.data.Dataset,
+        val_samples: Sequence[SurrogateSample] | torch.utils.data.Dataset,
         config: TrainConfig | None = None,
         device: torch.device | None = None,
+        allow_same_fire_leak: bool = False,
     ) -> None:
         self.config = config or TrainConfig()
         set_reproducible_seed(self.config.seed)
+        self.allow_same_fire_leak = allow_same_fire_leak
+
+        # Data leakage prevention: refuse any split placing the same fire in more than one split
+        def _extract_fires(data: Sequence[SurrogateSample] | torch.utils.data.Dataset) -> set[str]:
+            if isinstance(data, CompactSurrogateDataset):
+                return set(data.fire_ids)
+            if hasattr(data, "samples") and isinstance(getattr(data, "samples"), Sequence):
+                return {getattr(s, "fire_name", getattr(s, "fire_id", "")) for s in data.samples if getattr(s, "fire_name", getattr(s, "fire_id", ""))}
+            if isinstance(data, Sequence):
+                return {getattr(s, "fire_name", getattr(s, "fire_id", "")) for s in data if getattr(s, "fire_name", getattr(s, "fire_id", ""))}
+            return set()
+
+        train_fires = _extract_fires(train_samples)
+        val_fires = _extract_fires(val_samples)
+        shared_fires = train_fires.intersection(val_fires)
+
+        if shared_fires:
+            leak_msg = (
+                f"Data leakage detected! Leaking fire(s) {sorted(list(shared_fires))} placed in more than one split "
+                f"(found in both train={sorted(list(train_fires))} and val={sorted(list(val_fires))})."
+            )
+            if not self.allow_same_fire_leak:
+                raise ValueError(
+                    f"{leak_msg} The trainer strictly refuses splits that place the same fire in more than one split. "
+                    "Set allow_same_fire_leak=True to override with explicit warning."
+                )
+            else:
+                warn_msg = f"WARNING: Data leakage permitted via allow_same_fire_leak=True! {leak_msg}"
+                logger.warning(warn_msg)
+                print(warn_msg)
 
         # Strict training data constraint (Phase 2C & Phase 2D):
         # 1. Ellipse samples are flagged baseline_only and rejected by the trainer.
         # 2. Frozen teacher samples must match frozen hashes and teacher label sources.
-        rejected = [
-            s.sample_id
-            for s in train_samples
-            if getattr(s, "baseline_only", False)
-            or getattr(s, "source", "") == "analytic_wind_ellipse"
-        ]
-        if rejected:
-            raise ValueError(
-                f"SurrogateTrainer rejected {len(rejected)} sample(s) with baseline_only=True or "
-                f"source='analytic_wind_ellipse'. Training strictly requires teacher_v1 or frozen teacher labels only. "
-                f"First rejected sample: '{rejected[0]}'."
-            )
+        if isinstance(train_samples, Sequence):
+            rejected = [
+                s.sample_id
+                for s in train_samples
+                if getattr(s, "baseline_only", False)
+                or getattr(s, "source", "") == "analytic_wind_ellipse"
+            ]
+            if rejected:
+                raise ValueError(
+                    f"SurrogateTrainer rejected {len(rejected)} sample(s) with baseline_only=True or "
+                    f"source='analytic_wind_ellipse'. Training strictly requires teacher_v1 or frozen teacher labels only. "
+                    f"First rejected sample: '{rejected[0]}'."
+                )
 
-        # Enforce frozen teacher hashes and valid label sources
-        rejected_frozen = []
-        for s in train_samples:
-            src = getattr(s, "source", "")
-            cfg_h = getattr(s, "teacher_config_hash", None)
-            sim_h = getattr(s, "canonical_sim_hash", None)
+            # Enforce frozen teacher hashes and valid label sources
+            rejected_frozen = []
+            for s in train_samples:
+                src = getattr(s, "source", "")
+                cfg_h = getattr(s, "teacher_config_hash", None)
+                sim_h = getattr(s, "canonical_sim_hash", None)
 
-            # If sample specifies source outside recognized teacher sources
-            if src not in ("teacher_v2_ensemble", "teacher_v2_embers", "teacher_v1_cellular"):
-                rejected_frozen.append((s.sample_id, f"source='{src}' is not a recognized teacher source"))
-            elif src in ("teacher_v2_ensemble", "teacher_v2_embers"):
-                if cfg_h != EXPECTED_TEACHER_CONFIG_HASH:
-                    rejected_frozen.append((s.sample_id, f"teacher_config_hash='{cfg_h}' != '{EXPECTED_TEACHER_CONFIG_HASH}'"))
-                elif sim_h != EXPECTED_CANONICAL_SIM_HASH:
-                    rejected_frozen.append((s.sample_id, f"canonical_sim_hash='{sim_h}' != '{EXPECTED_CANONICAL_SIM_HASH}'"))
+                # If sample specifies source outside recognized teacher sources
+                if src not in ("teacher_v2_ensemble", "teacher_v2_embers", "teacher_v1_cellular"):
+                    rejected_frozen.append((s.sample_id, f"source='{src}' is not a recognized teacher source"))
+                elif src in ("teacher_v2_ensemble", "teacher_v2_embers"):
+                    if cfg_h != EXPECTED_TEACHER_CONFIG_HASH:
+                        rejected_frozen.append((s.sample_id, f"teacher_config_hash='{cfg_h}' != '{EXPECTED_TEACHER_CONFIG_HASH}'"))
+                    elif sim_h != EXPECTED_CANONICAL_SIM_HASH:
+                        rejected_frozen.append((s.sample_id, f"canonical_sim_hash='{sim_h}' != '{EXPECTED_CANONICAL_SIM_HASH}'"))
 
-        if rejected_frozen:
-            s_id, reason = rejected_frozen[0]
-            raise ValueError(
-                f"SurrogateTrainer rejected {len(rejected_frozen)} sample(s) whose hash differs or whose "
-                f"label source is not the frozen teacher. First rejection: '{s_id}' ({reason})."
-            )
+            if rejected_frozen:
+                s_id, reason = rejected_frozen[0]
+                raise ValueError(
+                    f"SurrogateTrainer rejected {len(rejected_frozen)} sample(s) whose hash differs or whose "
+                    f"label source is not the frozen teacher. First rejection: '{s_id}' ({reason})."
+                )
 
         if device is None:
             self.device = torch.device(
@@ -157,7 +192,10 @@ class SurrogateTrainer:
             lambda_bce=self.config.lambda_bce,
         )
 
-        self.train_dataset = SurrogateDataset(train_samples)
+        if isinstance(train_samples, torch.utils.data.Dataset):
+            self.train_dataset = train_samples
+        else:
+            self.train_dataset = SurrogateDataset(train_samples)
         self.val_samples = val_samples
 
         self.train_loader = DataLoader(
@@ -165,7 +203,7 @@ class SurrogateTrainer:
             batch_size=self.config.batch_size,
             shuffle=True,
             collate_fn=collate_surrogate_batch,
-            drop_last=(len(train_samples) >= self.config.batch_size),
+            drop_last=(len(self.train_dataset) >= self.config.batch_size),
         )
 
         self.optimizer = AdamW(
@@ -188,13 +226,54 @@ class SurrogateTrainer:
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def validate_shard(cls, shard_metadata: pd.DataFrame | str | Path) -> None:
-        """Validate that a shard's metadata matches the frozen teacher hash and label source.
+    def validate_shard(
+        cls,
+        shard_metadata: pd.DataFrame | str | Path,
+        expected_schema_version: str = SCHEMA_VERSION,
+    ) -> None:
+        """Validate that a shard's metadata matches the frozen teacher hash, label source, and schema_version.
 
         Raises:
-            AssertionError if hash differs or label source is not the frozen teacher.
+            AssertionError or ValueError if hash differs, label source is not frozen teacher, or schema_version mismatch.
         """
-        validate_shard_metadata(shard_metadata)
+        validate_shard_metadata(shard_metadata, expected_schema_version=expected_schema_version)
+
+    @classmethod
+    def from_shards(
+        cls,
+        model: WindConditionedUNet,
+        train_shards: list[str | Path],
+        val_shards: list[str | Path],
+        config: TrainConfig | None = None,
+        device: torch.device | None = None,
+        allow_same_fire_leak: bool = False,
+        fires_base_dir: str | Path = "data/tiles/fires",
+        expected_schema_version: str = SCHEMA_VERSION,
+    ) -> "SurrogateTrainer":
+        """Construct SurrogateTrainer directly from compact .npz shard files."""
+        for sp in train_shards:
+            cls.validate_shard(sp, expected_schema_version=expected_schema_version)
+        for sp in val_shards:
+            cls.validate_shard(sp, expected_schema_version=expected_schema_version)
+
+        train_ds = CompactSurrogateDataset(
+            train_shards,
+            fires_base_dir=fires_base_dir,
+            expected_schema_version=expected_schema_version,
+        )
+        val_ds = CompactSurrogateDataset(
+            val_shards,
+            fires_base_dir=fires_base_dir,
+            expected_schema_version=expected_schema_version,
+        )
+        return cls(
+            model=model,
+            train_samples=train_ds,
+            val_samples=val_ds,
+            config=config,
+            device=device,
+            allow_same_fire_leak=allow_same_fire_leak,
+        )
 
     def train_epoch(self, epoch: int) -> dict[str, float]:
         """Train for one single epoch."""

@@ -9,6 +9,9 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+out/
+wf052-code.zip
+*.zip
 develop-eggs/
 dist/
 downloads/

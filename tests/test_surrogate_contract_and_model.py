@@ -264,7 +264,12 @@ class TestSmokeTrainingRun:
     def test_one_epoch_smoke_training(self) -> None:
         set_reproducible_seed(42000)
         samples = [
-            create_synthetic_sample(sample_id=f"sample_{i}", shape=(64, 64), seed=i + 100)
+            create_synthetic_sample(
+                sample_id=f"sample_{i}",
+                fire_name="kincade" if i < 2 else "bobcat",
+                shape=(64, 64),
+                seed=i + 100,
+            )
             for i in range(4)
         ]
 

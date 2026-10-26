@@ -154,7 +154,7 @@ def evaluate_predictions_fidelity(
 
 def evaluate_model_on_samples(
     model: nn.Module,
-    samples: list[SurrogateSample],
+    samples: Sequence[SurrogateSample] | torch.utils.data.Dataset,
     device: torch.device,
     batch_size: int = 4,
     teacher_ref_ms: float = 35.0,
@@ -162,7 +162,16 @@ def evaluate_model_on_samples(
 ) -> SurrogateFidelityMetrics:
     """Run inference with the surrogate model on samples and compute fidelity metrics."""
     model.eval()
-    dataset = SurrogateDataset(samples)
+    if isinstance(samples, torch.utils.data.Dataset):
+        dataset = samples
+        if hasattr(samples, "fire_ids") and len(samples.fire_ids) > 0:
+            fire_label = str(samples.fire_ids[0])
+        else:
+            fire_label = "unknown"
+    else:
+        dataset = SurrogateDataset(samples)
+        fire_label = samples[0].fire_name if len(samples) > 0 else "unknown"
+
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,

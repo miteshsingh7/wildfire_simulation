@@ -113,6 +113,7 @@ class WindConditionedUNet(nn.Module):
         max_horizon_min: float = 720.0,
     ) -> None:
         super().__init__()
+        self.in_spatial_channels = in_spatial_channels
         self.max_horizon_min = max_horizon_min
         c1, c2, c3, c4 = base_channels, base_channels * 2, base_channels * 4, base_channels * 8
         # c1=32, c2=64, c3=128, c4=256

@@ -15,11 +15,21 @@ Target:
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import rasterio
 import torch
 from torch.utils.data import Dataset
+
+SCHEMA_VERSION: str = "2e"
+
+FIRE_SPLITS: dict[str, list[str]] = {
+    "train": ["kincade", "glass", "zogg", "creek"],
+    "val": ["bobcat"],
+    "test": ["caldor", "tamarack"],
+}
 
 
 def fbfm40_to_fuel_group(fbfm: np.ndarray) -> np.ndarray:
@@ -137,6 +147,13 @@ class SurrogateSample:
     k_ensemble: int = 16
     teacher_config_hash: str = "a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5"
     canonical_sim_hash: str = "61c9baec36ce945a464e3d91a62e228841a3a7900e450a446f9a1e1e4a56eed3"
+    # Scenario descriptor attributes (Phase 2E)
+    fire_id: str = ""
+    tile_id: str = ""
+    crop_origin: tuple[int, int] = (0, 0)
+    ignition_cell: tuple[int, int] = (128, 128)
+    schema_version: str = SCHEMA_VERSION
+    git_commit: str = ""
 
 
 @dataclass(frozen=True)
@@ -267,3 +284,197 @@ def collate_surrogate_batch(batch_list: list[dict[str, Any]]) -> SurrogateBatch:
         target_quantiles=t_quantiles,
         censor_quantiles=c_quantiles,
     )
+
+
+_FIRE_RASTER_CACHE: dict[str, dict[str, np.ndarray]] = {}
+
+
+def get_cached_fire_rasters(
+    fire_name: str, fires_base_dir: str | Path = "data/tiles/fires"
+) -> dict[str, np.ndarray]:
+    """Retrieve or cache static full fire domain rasters in memory."""
+    clean_name = fire_name.lower().strip()
+    if clean_name in _FIRE_RASTER_CACHE:
+        return _FIRE_RASTER_CACHE[clean_name]
+
+    fire_dir = Path(fires_base_dir) / clean_name
+    if not fire_dir.exists():
+        raise FileNotFoundError(f"Fire directory {fire_dir} not found for raster caching.")
+
+    with rasterio.open(fire_dir / "elevation.tif") as src:
+        elev_full = src.read(1).astype(np.float32)
+    with rasterio.open(fire_dir / "fbfm40.tif") as src:
+        fbfm_full = src.read(1).astype(np.int64)
+    with rasterio.open(fire_dir / "canopy_cover.tif") as src:
+        canopy_full = src.read(1).astype(np.float32)
+        if np.nanmax(canopy_full) > 1.0:
+            canopy_full = np.clip(canopy_full / 100.0, 0.0, 1.0)
+
+    fuel_grp_full = fbfm40_to_fuel_group(fbfm_full)
+
+    cached = {
+        "elevation": elev_full,
+        "fbfm40": fbfm_full,
+        "fuel_group": fuel_grp_full,
+        "canopy": canopy_full,
+    }
+    _FIRE_RASTER_CACHE[clean_name] = cached
+    return cached
+
+
+def rebuild_spatial_inputs(
+    fire_id: str,
+    crop_origin: tuple[int, int],
+    ignition_cell: tuple[int, int],
+    fires_base_dir: str | Path = "data/tiles/fires",
+    tile_shape: tuple[int, int] = (256, 256),
+) -> torch.Tensor:
+    """Rebuild the exact 13-channel spatial tensor on the fly from static fire rasters.
+
+    Channels:
+    0..6: Fuel group 1-hot (7 channels)
+    7: Slope (radians)
+    8: Aspect sine
+    9: Aspect cosine
+    10: Elevation z-score normalized per tile
+    11: Canopy cover [0, 1]
+    12: Ignition mask (3x3 box around ignition_cell)
+    """
+    cached = get_cached_fire_rasters(fire_id, fires_base_dir=fires_base_dir)
+    r0, c0 = crop_origin
+    h, w = tile_shape
+
+    elev_crop = cached["elevation"][r0 : r0 + h, c0 : c0 + w].copy()
+    fuel_grp_crop = cached["fuel_group"][r0 : r0 + h, c0 : c0 + w].copy()
+    canopy_crop = cached["canopy"][r0 : r0 + h, c0 : c0 + w].copy()
+
+    # One-hot fuel groups (7 channels)
+    fg_tensor = torch.from_numpy(fuel_grp_crop).long()
+    fg_onehot = torch.nn.functional.one_hot(fg_tensor, num_classes=7).permute(2, 0, 1).float()
+
+    # Continuous terrain
+    slope, asp_sin, asp_cos = compute_slope_aspect(elev_crop, resolution_m=60.0)
+    elev_z = ((elev_crop - np.mean(elev_crop)) / (np.std(elev_crop) + 1e-5)).astype(np.float32)
+
+    # Ignition mask (1 channel)
+    ign_r, ign_c = ignition_cell
+    ign_mask = np.zeros(tile_shape, dtype=np.float32)
+    r_lo, r_hi = max(0, ign_r - 1), min(h, ign_r + 2)
+    c_lo, c_hi = max(0, ign_c - 1), min(w, ign_c + 2)
+    ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
+    ign_tensor = torch.from_numpy(ign_mask).unsqueeze(0).float()
+
+    cont_tensor = torch.from_numpy(
+        np.stack([slope, asp_sin, asp_cos, elev_z, canopy_crop], axis=0)
+    ).float()
+
+    spatial_features = torch.cat([fg_onehot, cont_tensor, ign_tensor], dim=0)
+    return spatial_features
+
+
+class CompactSurrogateDataset(Dataset):
+    """PyTorch Dataset reading compact .npz shards with on-the-fly 13-channel reconstruction.
+
+    Labels stored:
+    - arrival_quantiles as float16 (minutes in [0, 720])
+    - burn_prob as uint8 (value * 255.0)
+    - censor masks as bit-packed uint8
+    - dynamic wind series as float32
+
+    Rebuilds 13-channel spatial tensor on the fly from cached fire tiles.
+    """
+
+    def __init__(
+        self,
+        shard_paths: list[Path | str] | Path | str,
+        fires_base_dir: str | Path = "data/tiles/fires",
+        expected_schema_version: str = SCHEMA_VERSION,
+    ) -> None:
+        if isinstance(shard_paths, (str, Path)):
+            p = Path(shard_paths)
+            if p.is_dir():
+                self.shard_paths = sorted(p.glob("shard_*.npz"))
+            else:
+                self.shard_paths = [p]
+        else:
+            self.shard_paths = [Path(p) for p in shard_paths]
+
+        self.fires_base_dir = Path(fires_base_dir)
+        self.expected_schema_version = expected_schema_version
+
+        self.samples_index: list[tuple[int, int]] = []
+        self.loaded_shards: list[dict[str, np.ndarray]] = []
+
+        for s_idx, sp in enumerate(self.shard_paths):
+            if not sp.exists():
+                raise FileNotFoundError(f"Shard file not found: {sp}")
+            npz = np.load(sp, allow_pickle=True)
+            schema_v = str(npz["schema_version"][0]) if "schema_version" in npz else "legacy"
+            if schema_v != self.expected_schema_version:
+                raise ValueError(
+                    f"Shard '{sp.name}' has schema_version '{schema_v}', "
+                    f"expected '{self.expected_schema_version}'!"
+                )
+            n_samples = len(npz["sample_ids"])
+            self.loaded_shards.append({k: npz[k] for k in npz.files})
+            for i in range(n_samples):
+                self.samples_index.append((s_idx, i))
+
+        self.fire_ids: list[str] = [
+            str(self.loaded_shards[s_idx]["fire_ids"][i]) for s_idx, i in self.samples_index
+        ]
+        self.sample_ids: list[str] = [
+            str(self.loaded_shards[s_idx]["sample_ids"][i]) for s_idx, i in self.samples_index
+        ]
+
+    def __len__(self) -> int:
+        return len(self.samples_index)
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        s_idx, i = self.samples_index[idx]
+        shard = self.loaded_shards[s_idx]
+
+        fire_id = str(shard["fire_ids"][i])
+        sample_id = str(shard["sample_ids"][i])
+        crop_origin = (int(shard["crop_origins"][i, 0]), int(shard["crop_origins"][i, 1]))
+        ign_cell = (int(shard["ignition_cells"][i, 0]), int(shard["ignition_cells"][i, 1]))
+
+        # Rebuild 13-channel spatial tensor
+        spatial_features = rebuild_spatial_inputs(
+            fire_id=fire_id,
+            crop_origin=crop_origin,
+            ignition_cell=ign_cell,
+            fires_base_dir=self.fires_base_dir,
+            tile_shape=(256, 256),
+        )
+
+        # Decode labels
+        arr_q = shard["arrival_quantiles"][i].astype(np.float32)
+        bp = shard["burn_prob"][i].astype(np.float32) / 255.0
+
+        c_packed = shard["censor_quantiles_packed"][i]  # (3, 8192) uint8
+        c_unpacked = (
+            np.unpackbits(c_packed, axis=-1)
+            .reshape(3, 256, 256)
+            .astype(np.float32)
+        )
+
+        wind = shard["wind_series"][i].astype(np.float32)
+
+        cached = get_cached_fire_rasters(fire_id, fires_base_dir=self.fires_base_dir)
+        r0, c0 = crop_origin
+        fuel_grp_crop = cached["fuel_group"][r0 : r0 + 256, c0 : c0 + 256]
+        fg_tensor = torch.from_numpy(fuel_grp_crop).long()
+
+        return {
+            "spatial_features": spatial_features,
+            "fuel_group": fg_tensor,
+            "wind_series": torch.from_numpy(wind).float(),
+            "target_arrival": torch.from_numpy(arr_q[1]).float(),
+            "censor_mask": torch.from_numpy(c_unpacked[1]).float(),
+            "burn_prob": torch.from_numpy(bp).float(),
+            "target_quantiles": torch.from_numpy(arr_q).float(),
+            "censor_quantiles": torch.from_numpy(c_unpacked).float(),
+            "fire_name": fire_id,
+            "sample_id": sample_id,
+        }

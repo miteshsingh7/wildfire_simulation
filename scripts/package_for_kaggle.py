@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Package codebase and training fire rasters for Kaggle execution (Phase 2C).
+"""Package codebase and training fire rasters for Kaggle execution (Phase 2E).
 
 Packages:
 1. wf052-code:
    - src/
    - configs/
    - pyproject.toml
+   - GIT_COMMIT.txt (HEAD commit hash and dirty status)
 2. wf052-tiles-train:
    - Static rasters (elevation.tif, fbfm40.tif, canopy_cover.tif) and hrrr_weather_hourly.parquet
      for the 7 training fires ONLY:
@@ -21,9 +22,51 @@ import argparse
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+
+def get_git_commit_info(repo_root: Path, allow_dirty: bool = False) -> tuple[str, bool]:
+    """Retrieve HEAD commit hash and verify if the working tree is clean.
+
+    Raises:
+        RuntimeError if repository is dirty and allow_dirty is False.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        commit_hash = res.stdout.strip()
+    except Exception as exc:
+        commit_hash = f"unknown_{exc}"
+
+    try:
+        status_res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        status_out = status_res.stdout.strip()
+        is_dirty = bool(status_out)
+    except Exception:
+        is_dirty = True
+        status_out = "error checking status"
+
+    if is_dirty and not allow_dirty:
+        raise RuntimeError(
+            f"Refusing to package from a dirty git tree! Uncommitted changes:\n{status_out}\n"
+            "Please commit all changes before packaging or specify --allow-dirty."
+        )
+
+    return commit_hash, is_dirty
 
 SEVEN_TRAINING_FIRES: list[str] = [
     "bobcat",
@@ -68,12 +111,18 @@ def compute_file_sha256(file_path: Path) -> str:
     return h.hexdigest()
 
 
-def build_wf052_code_zip(repo_root: Path, zip_dest: Path) -> tuple[int, str]:
+def build_wf052_code_zip(
+    repo_root: Path,
+    zip_dest: Path,
+    allow_dirty: bool = True,
+) -> tuple[int, str]:
     """Package code into wf052-code.zip excluding data, caches, .venv, checkpoints.
 
     Returns:
         (size_bytes, sha256_hash)
     """
+    commit_hash, is_dirty = get_git_commit_info(repo_root, allow_dirty=allow_dirty)
+
     zip_dest.parent.mkdir(parents=True, exist_ok=True)
     if zip_dest.exists():
         zip_dest.unlink()
@@ -82,6 +131,9 @@ def build_wf052_code_zip(repo_root: Path, zip_dest: Path) -> tuple[int, str]:
     included_files = ["pyproject.toml"]
 
     with zipfile.ZipFile(zip_dest, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Write GIT_COMMIT.txt into archive root
+        zf.writestr("GIT_COMMIT.txt", f"commit: {commit_hash}\ndirty: {is_dirty}\n")
+
         for inc_dir in included_dirs:
             base_p = repo_root / inc_dir
             if not base_p.exists():
@@ -168,12 +220,15 @@ def format_bytes(num_bytes: int) -> str:
 def build_kaggle_packages(
     repo_root: Path,
     output_base: Path,
+    allow_dirty: bool = True,
 ) -> tuple[Path, Path, int, int]:
     """Build wf052-code and wf052-tiles-train packaging directories.
 
     Returns:
         (code_dir, tiles_dir, code_bytes, tiles_bytes)
     """
+    commit_hash, is_dirty = get_git_commit_info(repo_root, allow_dirty=allow_dirty)
+
     output_base.mkdir(parents=True, exist_ok=True)
 
     code_dir = output_base / "wf052-code"
@@ -211,6 +266,10 @@ def build_kaggle_packages(
     )
     # Copy pyproject.toml
     shutil.copy2(pyproject_file, code_dir / "pyproject.toml")
+
+    # Write GIT_COMMIT.txt into wf052-code
+    commit_info_file = code_dir / "GIT_COMMIT.txt"
+    commit_info_file.write_text(f"commit: {commit_hash}\ndirty: {is_dirty}\n", encoding="utf-8")
 
     # 2. Package wf052-tiles-train
     print("[2/2] Building wf052-tiles-train package...")
@@ -262,7 +321,7 @@ def build_kaggle_packages(
     tiles_size = compute_folder_size_bytes(tiles_dir)
 
     print("\n" + "=" * 60)
-    print("Kaggle Packaging Summary (Phase 2C)")
+    print("Kaggle Packaging Summary (Phase 2E)")
     print("=" * 60)
     print(f"wf052-code path:        {code_dir}")
     print(f"wf052-code total size:  {format_bytes(code_size)}")
@@ -284,18 +343,23 @@ def main() -> int:
         default=Path("build/kaggle"),
         help="Target directory to create packaged folders (default: build/kaggle)",
     )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Allow packaging from a dirty git tree (default: False)",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
     output_dir = (repo_root / args.output_dir).resolve()
 
     # 1. Build directory packages (wf052-code, wf052-tiles-train)
-    build_kaggle_packages(repo_root, output_dir)
+    build_kaggle_packages(repo_root, output_dir, allow_dirty=args.allow_dirty)
 
     # 2. Build wf052-code.zip
     print("\n[3/4] Building wf052-code.zip...")
     zip_dest = repo_root / "wf052-code.zip"
-    zip_size, zip_sha = build_wf052_code_zip(repo_root, zip_dest)
+    zip_size, zip_sha = build_wf052_code_zip(repo_root, zip_dest, allow_dirty=args.allow_dirty)
     # Also save a copy inside output_dir
     shutil.copy2(zip_dest, output_dir / "wf052-code.zip")
     print(f"wf052-code.zip path:    {zip_dest}")

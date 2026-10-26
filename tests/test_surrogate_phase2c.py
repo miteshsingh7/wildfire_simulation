@@ -273,7 +273,7 @@ class TestPhase2CStratification:
             ]
             df_meta = save_shard_with_metadata(samples, shard_id="shard_000", shards_dir=shards_dir)
 
-            assert (shards_dir / "shard_000.pkl").exists()
+            assert (shards_dir / "shard_000.npz").exists() or (shards_dir / "shard_000.pkl").exists()
             assert (shards_dir / "shard_000_metadata.csv").exists()
 
             # Verify columns

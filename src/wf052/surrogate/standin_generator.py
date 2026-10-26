@@ -31,6 +31,7 @@ import yaml
 from wf052.sim.ember_kernel import EmberParams, simulate_teacher_with_embers_60m
 from wf052.sim.teacher_calibrator import FBFM40_TO_P_VEG, FireDataset60m, TeacherParams
 from wf052.surrogate.dataset import (
+    SCHEMA_VERSION,
     SurrogateSample,
     calculate_upwind_third_ignition,
     compute_slope_aspect,
@@ -263,16 +264,46 @@ def get_teacher_config_hash(config_path: str | Path | None = None) -> str:
     return EXPECTED_TEACHER_CONFIG_HASH
 
 
-def validate_shard_metadata(df_or_path: pd.DataFrame | str | Path) -> None:
-    """Assert that shard metadata satisfies frozen teacher requirements."""
+def validate_shard_metadata(
+    df_or_path: pd.DataFrame | str | Path,
+    expected_schema_version: str = SCHEMA_VERSION,
+) -> None:
+    """Assert that shard metadata satisfies frozen teacher and schema version requirements."""
     if isinstance(df_or_path, (str, Path)):
-        df = pd.read_csv(df_or_path)
+        p = Path(df_or_path)
+        if p.suffix == ".npz":
+            npz = np.load(p, allow_pickle=True)
+            schema_v = str(npz["schema_version"][0]) if "schema_version" in npz else "legacy"
+            if schema_v != expected_schema_version:
+                raise ValueError(
+                    f"Shard '{p.name}' has invalid schema_version '{schema_v}' (expected '{expected_schema_version}')!"
+                )
+            cfg_h = str(npz["teacher_config_hash"][0]) if "teacher_config_hash" in npz else ""
+            if cfg_h != EXPECTED_TEACHER_CONFIG_HASH:
+                raise ValueError(
+                    f"Shard '{p.name}' has invalid teacher_config_hash '{cfg_h}' (expected '{EXPECTED_TEACHER_CONFIG_HASH}')!"
+                )
+            sim_h = str(npz["canonical_sim_hash"][0]) if "canonical_sim_hash" in npz else ""
+            if sim_h != EXPECTED_CANONICAL_SIM_HASH:
+                raise ValueError(
+                    f"Shard '{p.name}' has invalid canonical_sim_hash '{sim_h}' (expected '{EXPECTED_CANONICAL_SIM_HASH}')!"
+                )
+            return
+
+        df = pd.read_csv(p)
     else:
         df = df_or_path
 
     assert "canonical_sim_hash" in df.columns, "Metadata missing 'canonical_sim_hash'!"
     assert "teacher_config_hash" in df.columns, "Metadata missing 'teacher_config_hash'!"
     assert "source" in df.columns, "Metadata missing 'source'!"
+
+    if "schema_version" in df.columns:
+        bad_schema = df[df["schema_version"] != expected_schema_version]
+        assert bad_schema.empty, (
+            f"Shard metadata contains invalid schema_version: '{bad_schema['schema_version'].iloc[0]}' "
+            f"(expected '{expected_schema_version}')"
+        )
 
     bad_sim = df[df["canonical_sim_hash"] != EXPECTED_CANONICAL_SIM_HASH]
     assert bad_sim.empty, (
@@ -467,6 +498,18 @@ def build_tile_fire_dataset_60m(
     )
 
 
+def compute_quantile_order_index(num: int, den: int, k_seeds: int) -> int:
+    """Compute 0-based order statistic index for quantile fraction num/den using integer arithmetic:
+    ceil(num * K / den) - 1 = ((num * K + den - 1) // den) - 1.
+
+    Guarantees exact integer order statistic rank without floating-point rounding issues.
+    """
+    assert k_seeds > 0, "k_seeds must be strictly positive"
+    assert 0 < num < den, "Fraction num/den must be strictly between 0 and 1"
+    rank_1based = (num * k_seeds + den - 1) // den
+    return rank_1based - 1
+
+
 def simulate_ensemble_teacher_v2(
     ds: FireDataset60m,
     t_params: TeacherParams,
@@ -532,8 +575,13 @@ def simulate_ensemble_teacher_v2(
 
     quantiles: dict[float, np.ndarray] = {}
     masks: dict[float, np.ndarray] = {}
-    for tau in (0.1, 0.5, 0.9):
-        idx = int(np.ceil(tau * k_seeds)) - 1
+    tau_fractions = [
+        (0.1, 1, 10),
+        (0.5, 1, 2),
+        (0.9, 9, 10),
+    ]
+    for tau, num, den in tau_fractions:
+        idx = compute_quantile_order_index(num, den, k_seeds)
         val = sorted_runs[idx]
         censored = np.isinf(val) | np.isnan(val) | (val > horizon_min)
         q_arr = np.where(censored, horizon_min, val).astype(np.float32)
@@ -760,10 +808,24 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
         and not np.array_equal(sample.censor_mask_q10, sample.censor_mask_q90)
     )
 
+    commit_str = getattr(sample, "git_commit", "")
+    crop_r0 = int(getattr(sample, "crop_origin", (0, 0))[0])
+    crop_c0 = int(getattr(sample, "crop_origin", (0, 0))[1])
+    ign_r = int(getattr(sample, "ignition_cell", (128, 128))[0])
+    ign_c = int(getattr(sample, "ignition_cell", (128, 128))[1])
+    t_id = getattr(sample, "tile_id", f"{sample.fire_name}_tile0")
+
     return {
+        "fire_id": sample.fire_name,
         "fire": sample.fire_name,
+        "tile_id": t_id,
+        "sample_id": sample.sample_id,
         "source": sample.source,
         "seed": int(sample.seed),
+        "crop_r0": crop_r0,
+        "crop_c0": crop_c0,
+        "ign_r": ign_r,
+        "ign_c": ign_c,
         "peak_wind": round(peak_wind, 3),
         "burned_fraction": round(burned_frac, 4),
         "censored_fraction": round(censored_frac, 4),
@@ -776,7 +838,8 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
         "canonical_sim_hash": sim_hash,
         "bin": bin_idx,
         "shard_id": shard_id,
-        "sample_id": sample.sample_id,
+        "schema_version": SCHEMA_VERSION,
+        "git_commit": commit_str,
     }
 
 
@@ -784,28 +847,221 @@ def save_shard_with_metadata(
     samples: Sequence[SurrogateSample],
     shard_id: str,
     shards_dir: Path,
+    git_commit: str = "",
 ) -> pd.DataFrame:
-    """Save sample objects to a pickle file and metadata to a CSV file.
-
-    Creates:
-    - shards_dir / f"{shard_id}.pkl"
+    """Save shard in Phase 2E compact format:
+    - shards_dir / f"{shard_id}.npz"
     - shards_dir / f"{shard_id}_metadata.csv"
+    - shards_dir / f"{shard_id}_metadata.json"
 
-    Returns:
-    - pd.DataFrame containing the metadata rows.
+    No pickled dataclasses. Rebuilds 13-channel inputs on the fly from tiles.
     """
-    import pickle
-
     shards_dir = Path(shards_dir)
     shards_dir.mkdir(parents=True, exist_ok=True)
 
-    pkl_path = shards_dir / f"{shard_id}.pkl"
-    tmp_pkl = shards_dir / f"tmp_{shard_id}.pkl"
-    with open(tmp_pkl, "wb") as f:
-        pickle.dump(list(samples), f, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp_pkl.rename(pkl_path)
+    N = len(samples)
+    arr_q_list = []
+    bp_list = []
+    c_packed_list = []
+    wind_list = []
+    crop_orig_list = []
+    ign_cell_list = []
+    seed_list = []
+    fire_id_list = []
+    tile_id_list = []
+    sample_id_list = []
+
+    for s in samples:
+        q10 = s.arrival_q10 if s.arrival_q10 is not None else s.target_arrival_time
+        q50 = s.arrival_q50 if s.arrival_q50 is not None else s.target_arrival_time
+        q90 = s.arrival_q90 if s.arrival_q90 is not None else s.target_arrival_time
+        quantiles_3 = np.stack([q10, q50, q90], axis=0).astype(np.float16)
+        arr_q_list.append(quantiles_3)
+
+        bp = s.burn_prob if s.burn_prob is not None else (1.0 - s.censor_mask)
+        bp_u8 = np.clip(np.round(bp * 255.0), 0, 255).astype(np.uint8)
+        bp_list.append(bp_u8)
+
+        c10 = (s.censor_mask_q10 if s.censor_mask_q10 is not None else s.censor_mask) > 0.5
+        c50 = (s.censor_mask_q50 if s.censor_mask_q50 is not None else s.censor_mask) > 0.5
+        c90 = (s.censor_mask_q90 if s.censor_mask_q90 is not None else s.censor_mask) > 0.5
+        c_packed = np.stack([np.packbits(c10), np.packbits(c50), np.packbits(c90)], axis=0)
+        c_packed_list.append(c_packed)
+
+        wind_list.append(s.hourly_wind_uv.astype(np.float32))
+        crop_orig_list.append(getattr(s, "crop_origin", (0, 0)))
+        ign_cell_list.append(getattr(s, "ignition_cell", (128, 128)))
+        seed_list.append(int(s.seed))
+        fire_id_list.append(str(s.fire_name))
+        tile_id_list.append(str(getattr(s, "tile_id", f"{s.fire_name}_tile0")))
+        sample_id_list.append(str(s.sample_id))
+
+    commit_val = git_commit or (getattr(samples[0], "git_commit", "") if samples else "")
+    cfg_hash = (
+        getattr(samples[0], "teacher_config_hash", EXPECTED_TEACHER_CONFIG_HASH)
+        if samples
+        else EXPECTED_TEACHER_CONFIG_HASH
+    )
+    sim_hash = (
+        getattr(samples[0], "canonical_sim_hash", EXPECTED_CANONICAL_SIM_HASH)
+        if samples
+        else EXPECTED_CANONICAL_SIM_HASH
+    )
+
+    npz_path = shards_dir / f"{shard_id}.npz"
+    tmp_npz = shards_dir / f"tmp_{shard_id}.npz"
+    np.savez_compressed(
+        tmp_npz,
+        arrival_quantiles=np.stack(arr_q_list, axis=0)
+        if arr_q_list
+        else np.empty((0, 3, 256, 256), dtype=np.float16),
+        burn_prob=np.stack(bp_list, axis=0) if bp_list else np.empty((0, 256, 256), dtype=np.uint8),
+        censor_quantiles_packed=np.stack(c_packed_list, axis=0)
+        if c_packed_list
+        else np.empty((0, 3, 8192), dtype=np.uint8),
+        wind_series=np.stack(wind_list, axis=0)
+        if wind_list
+        else np.empty((0, 12, 2), dtype=np.float32),
+        crop_origins=np.array(crop_orig_list, dtype=np.int32)
+        if crop_orig_list
+        else np.empty((0, 2), dtype=np.int32),
+        ignition_cells=np.array(ign_cell_list, dtype=np.int32)
+        if ign_cell_list
+        else np.empty((0, 2), dtype=np.int32),
+        seeds=np.array(seed_list, dtype=np.int64) if seed_list else np.empty((0,), dtype=np.int64),
+        fire_ids=np.array(fire_id_list) if fire_id_list else np.empty((0,), dtype=object),
+        tile_ids=np.array(tile_id_list) if tile_id_list else np.empty((0,), dtype=object),
+        sample_ids=np.array(sample_id_list) if sample_id_list else np.empty((0,), dtype=object),
+        schema_version=np.array([SCHEMA_VERSION]),
+        git_commit=np.array([commit_val]),
+        teacher_config_hash=np.array([cfg_hash]),
+        canonical_sim_hash=np.array([sim_hash]),
+    )
+    tmp_npz.rename(npz_path)
 
     rows = [sample_to_metadata_dict(s, shard_id) for s in samples]
+    for r in rows:
+        r["git_commit"] = commit_val
+        r["schema_version"] = SCHEMA_VERSION
+    df = pd.DataFrame(rows)
+    csv_path = shards_dir / f"{shard_id}_metadata.csv"
+    df.to_csv(csv_path, index=False)
+
+    meta_json = {
+        "shard_id": shard_id,
+        "schema_version": SCHEMA_VERSION,
+        "git_commit": commit_val,
+        "num_samples": N,
+        "teacher_config_hash": cfg_hash,
+        "canonical_sim_hash": sim_hash,
+        "tile_shape": [256, 256],
+        "k_ensemble": int(getattr(samples[0], "k_ensemble", 16)) if samples else 16,
+    }
+    with open(shards_dir / f"{shard_id}_metadata.json", "w", encoding="utf-8") as f:
+        json.dump(meta_json, f, indent=2)
+
+    return df
+
+
+def load_shard_samples(
+    shard_path: Path | str,
+    fires_base_dir: str | Path = "data/tiles/fires",
+    expected_schema_version: str = SCHEMA_VERSION,
+) -> list[SurrogateSample]:
+    """Load samples from a shard (.npz) reconstructing SurrogateSample objects."""
+    shard_p = Path(shard_path)
+    if not shard_p.exists():
+        raise FileNotFoundError(f"Shard file not found: {shard_p}")
+
+    if shard_p.suffix == ".pkl":
+        import pickle
+        with open(shard_p, "rb") as f:
+            return pickle.load(f)
+
+    npz = np.load(shard_p, allow_pickle=True)
+    schema_v = str(npz["schema_version"][0]) if "schema_version" in npz else "legacy"
+    if schema_v != expected_schema_version:
+        raise ValueError(
+            f"Shard '{shard_p.name}' has schema_version '{schema_v}', expected '{expected_schema_version}'!"
+        )
+
+    cfg_h = str(npz["teacher_config_hash"][0]) if "teacher_config_hash" in npz else ""
+    if cfg_h != EXPECTED_TEACHER_CONFIG_HASH:
+        raise ValueError(
+            f"Shard '{shard_p.name}' teacher_config_hash '{cfg_h}' != '{EXPECTED_TEACHER_CONFIG_HASH}'!"
+        )
+
+    sim_h = str(npz["canonical_sim_hash"][0]) if "canonical_sim_hash" in npz else ""
+    if sim_h != EXPECTED_CANONICAL_SIM_HASH:
+        raise ValueError(
+            f"Shard '{shard_p.name}' canonical_sim_hash '{sim_h}' != '{EXPECTED_CANONICAL_SIM_HASH}'!"
+        )
+
+    n_samples = len(npz["sample_ids"])
+    samples: list[SurrogateSample] = []
+    for i in range(n_samples):
+        fire = str(npz["fire_ids"][i])
+        s_id = str(npz["sample_ids"][i])
+        t_id = str(npz["tile_ids"][i])
+        r0, c0 = int(npz["crop_origins"][i, 0]), int(npz["crop_origins"][i, 1])
+        ign_r, ign_c = int(npz["ignition_cells"][i, 0]), int(npz["ignition_cells"][i, 1])
+
+        # Rebuild rasters from cached fire
+        cached = get_cached_fire_rasters(fire, fires_base_dir=fires_base_dir)
+        fuel_crop = cached["fuel_group"][r0 : r0 + 256, c0 : c0 + 256]
+        elev_crop = cached["elevation"][r0 : r0 + 256, c0 : c0 + 256]
+        canopy_crop = cached["canopy"][r0 : r0 + 256, c0 : c0 + 256]
+
+        slope, asp_sin, asp_cos = compute_slope_aspect(elev_crop, resolution_m=60.0)
+        elev_z = ((elev_crop - np.mean(elev_crop)) / (np.std(elev_crop) + 1e-5)).astype(np.float32)
+
+        ign_mask = np.zeros((256, 256), dtype=np.float32)
+        r_lo, r_hi = max(0, ign_r - 1), min(256, ign_r + 2)
+        c_lo, c_hi = max(0, ign_c - 1), min(256, ign_c + 2)
+        ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
+
+        arr_q = npz["arrival_quantiles"][i].astype(np.float32)  # (3, 256, 256)
+        bp = npz["burn_prob"][i].astype(np.float32) / 255.0
+
+        c_packed = npz["censor_quantiles_packed"][i]
+        c_unpacked = np.unpackbits(c_packed, axis=-1).reshape(3, 256, 256).astype(np.float32)
+
+        sample = SurrogateSample(
+            fire_name=fire,
+            sample_id=s_id,
+            fuel_group=fuel_crop,
+            slope=slope,
+            aspect_sin=asp_sin,
+            aspect_cos=asp_cos,
+            elevation_z=elev_z,
+            canopy_cover=canopy_crop,
+            ignition_mask=ign_mask,
+            hourly_wind_uv=npz["wind_series"][i].astype(np.float32),
+            target_arrival_time=arr_q[1],
+            censor_mask=c_unpacked[1],
+            scaffold_tag=f"scaffold_{cfg_h[:8]}",
+            seed=int(npz["seeds"][i]),
+            source="teacher_v2_ensemble",
+            baseline_only=False,
+            burn_prob=bp,
+            arrival_q10=arr_q[0],
+            arrival_q50=arr_q[1],
+            arrival_q90=arr_q[2],
+            censor_mask_q10=c_unpacked[0],
+            censor_mask_q50=c_unpacked[1],
+            censor_mask_q90=c_unpacked[2],
+            k_ensemble=16,
+            teacher_config_hash=cfg_h,
+            canonical_sim_hash=sim_h,
+            fire_id=fire,
+            tile_id=t_id,
+            crop_origin=(r0, c0),
+            ignition_cell=(ign_r, ign_c),
+            schema_version=schema_v,
+            git_commit=str(npz["git_commit"][0]) if "git_commit" in npz else "",
+        )
+        samples.append(sample)
+    return samples
     df = pd.DataFrame(rows)
     csv_path = shards_dir / f"{shard_id}_metadata.csv"
     df.to_csv(csv_path, index=False)
