@@ -336,14 +336,26 @@ if orig_key in routes_data:
             "width": 5,
         })
 
-    # Agent A2 Route (Blue)
-    a2_path = o_info["agent_a2"]["path"]
+    # Agent A2-assim Route (Blue)
+    a2_info = o_info.get("agent_a2_assim", o_info.get("agent_a2", {}))
+    a2_path = a2_info.get("path", [])
     if a2_path and a2_path != st_path:
         route_paths.append({
-            "method": "Agent A2 (Teacher v2)",
+            "method": "Agent A2-assim (Teacher v2)",
             "path": a2_path,
             "color": [40, 120, 230, 220],
             "width": 6,
+        })
+
+    # Agent A2-pure Route (Cyan)
+    a2_pure_info = o_info.get("agent_a2_pure", {})
+    a2_pure_path = a2_pure_info.get("path", [])
+    if a2_pure_path and a2_pure_path != a2_path and a2_pure_path != st_path:
+        route_paths.append({
+            "method": "Agent A2-pure (Unassimilated)",
+            "path": a2_pure_path,
+            "color": [20, 190, 220, 200],
+            "width": 5,
         })
 
     # Agent A3 Route (Orange)
@@ -446,9 +458,9 @@ with tab_origin:
         c1, c2, c3, c4 = st.columns(4)
         methods_meta = [
             ("Static Baseline", o["static"], c1, "Ignored Hazards"),
-            ("Agent A2 (Teacher v2)", o["agent_a2"], c2, "Teacher Physics"),
-            ("Agent A3 (Surrogate)", o["agent_a3"], c3, "Surrogate 30m Updates"),
-            ("Agent B-on-A3", o["agent_b_on_a3"], c4, "Obs Inflation + Surr"),
+            ("Agent A2-assim", o.get("agent_a2_assim", o["agent_a2"]), c2, "Causal Assimilation"),
+            ("Agent A2-pure", o.get("agent_a2_pure", o["agent_a2"]), c3, "Unassimilated Physics"),
+            ("Agent A3 (Surrogate)", o["agent_a3"], c4, "Surrogate 30m Updates"),
         ]
 
         for name, m_data, col, note in methods_meta:

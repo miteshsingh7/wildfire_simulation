@@ -146,3 +146,32 @@ class TestSurrogateEvaluate:
         assert len(agg) == 1
         assert agg.iloc[0]["flag"] == "LOW-N"
         assert agg.iloc[0]["n"] == 2
+
+    def test_baseline_b1_fits_and_predicts_quantiles_separately(self) -> None:
+        """BaselineB1 stores and predicts separate tables for q10, q50, and q90."""
+        n_dist = 9
+        n_wind = 4
+        table_bp = np.full((n_dist, n_wind), 0.25, dtype=np.float32)
+        table_q10 = np.full((n_dist, n_wind), 120.0, dtype=np.float32)
+        table_q50 = np.full((n_dist, n_wind), 240.0, dtype=np.float32)
+        table_q90 = np.full((n_dist, n_wind), 480.0, dtype=np.float32)
+
+        b1 = BaselineB1(
+            table_burn_prob=table_bp,
+            table_q10=table_q10,
+            table_q50=table_q50,
+            table_q90=table_q90,
+        )
+
+        pred_q, pred_bp = b1.predict(ign_r=128, ign_c=128, peak_wind_ms=2.0)
+
+        assert pred_q.shape == (3, 256, 256)
+        assert pred_bp.shape == (256, 256)
+        # Verify quantiles are strictly distinct
+        assert np.allclose(pred_q[0], 120.0)
+        assert np.allclose(pred_q[1], 240.0)
+        assert np.allclose(pred_q[2], 480.0)
+        assert not np.allclose(pred_q[0], pred_q[1])
+        assert not np.allclose(pred_q[1], pred_q[2])
+
+

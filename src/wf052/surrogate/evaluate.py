@@ -178,10 +178,14 @@ class BaselineB1:
     def __init__(
         self,
         table_burn_prob: np.ndarray,  # shape (n_dist_bins, n_wind_bins)
+        table_q10: np.ndarray,        # shape (n_dist_bins, n_wind_bins)
         table_q50: np.ndarray,        # shape (n_dist_bins, n_wind_bins)
+        table_q90: np.ndarray,        # shape (n_dist_bins, n_wind_bins)
     ) -> None:
         self.table_burn_prob = table_burn_prob
+        self.table_q10 = table_q10
         self.table_q50 = table_q50
+        self.table_q90 = table_q90
 
     def predict(
         self,
@@ -206,10 +210,11 @@ class BaselineB1:
         dist_idx = np.digitize(dist_km, DIST_BINS_KM[1:-1])  # 0 to 8
 
         pred_bp = self.table_burn_prob[dist_idx, w_idx]
+        pred_q10 = self.table_q10[dist_idx, w_idx]
         pred_q50 = self.table_q50[dist_idx, w_idx]
+        pred_q90 = self.table_q90[dist_idx, w_idx]
 
-        # For B1 quantiles, use q50 across all three quantiles
-        pred_q = np.stack([pred_q50, pred_q50, pred_q50], axis=0)
+        pred_q = np.stack([pred_q10, pred_q50, pred_q90], axis=0)
         return pred_q, pred_bp
 
 
@@ -237,8 +242,12 @@ def fit_baseline_b1(dataset: CompactSurrogateDataset, train_fires: Sequence[str]
     sum_bp = np.zeros((n_dist, n_wind), dtype=np.float64)
     cnt_bp = np.zeros((n_dist, n_wind), dtype=np.int64)
 
+    sum_q10 = np.zeros((n_dist, n_wind), dtype=np.float64)
+    cnt_q10 = np.zeros((n_dist, n_wind), dtype=np.int64)
     sum_q50 = np.zeros((n_dist, n_wind), dtype=np.float64)
     cnt_q50 = np.zeros((n_dist, n_wind), dtype=np.int64)
+    sum_q90 = np.zeros((n_dist, n_wind), dtype=np.float64)
+    cnt_q90 = np.zeros((n_dist, n_wind), dtype=np.int64)
 
     for idx, f in enumerate(dataset.fire_ids):
         if f in train_fires:
@@ -261,9 +270,15 @@ def fit_baseline_b1(dataset: CompactSurrogateDataset, train_fires: Sequence[str]
             d_idx = np.digitize(dist_km, DIST_BINS_KM[1:-1])
 
             bp = shard["burn_prob"][i].astype(np.float32) / 255.0
+            q10 = shard["arrival_quantiles"][i, 0].astype(np.float32)
             q50 = shard["arrival_quantiles"][i, 1].astype(np.float32)
-            c_packed = shard["censor_quantiles_packed"][i, 1]
-            c_unpacked = np.unpackbits(c_packed).reshape(256, 256)
+            q90 = shard["arrival_quantiles"][i, 2].astype(np.float32)
+            c_packed_q10 = shard["censor_quantiles_packed"][i, 0]
+            c_packed_q50 = shard["censor_quantiles_packed"][i, 1]
+            c_packed_q90 = shard["censor_quantiles_packed"][i, 2]
+            c_q10 = np.unpackbits(c_packed_q10).reshape(256, 256)
+            c_q50 = np.unpackbits(c_packed_q50).reshape(256, 256)
+            c_q90 = np.unpackbits(c_packed_q90).reshape(256, 256)
 
             for d in range(n_dist):
                 mask_d = d_idx == d
@@ -271,22 +286,38 @@ def fit_baseline_b1(dataset: CompactSurrogateDataset, train_fires: Sequence[str]
                     sum_bp[d, w_idx] += float(np.sum(bp[mask_d]))
                     cnt_bp[d, w_idx] += int(np.sum(mask_d))
 
-                    finite_q50 = mask_d & (c_unpacked == 0)
+                    finite_q10 = mask_d & (c_q10 == 0)
+                    if np.any(finite_q10):
+                        sum_q10[d, w_idx] += float(np.sum(q10[finite_q10]))
+                        cnt_q10[d, w_idx] += int(np.sum(finite_q10))
+
+                    finite_q50 = mask_d & (c_q50 == 0)
                     if np.any(finite_q50):
                         sum_q50[d, w_idx] += float(np.sum(q50[finite_q50]))
                         cnt_q50[d, w_idx] += int(np.sum(finite_q50))
 
+                    finite_q90 = mask_d & (c_q90 == 0)
+                    if np.any(finite_q90):
+                        sum_q90[d, w_idx] += float(np.sum(q90[finite_q90]))
+                        cnt_q90[d, w_idx] += int(np.sum(finite_q90))
+
     table_bp = np.zeros((n_dist, n_wind), dtype=np.float32)
+    table_q10 = np.full((n_dist, n_wind), 720.0, dtype=np.float32)
     table_q50 = np.full((n_dist, n_wind), 720.0, dtype=np.float32)
+    table_q90 = np.full((n_dist, n_wind), 720.0, dtype=np.float32)
 
     for d in range(n_dist):
         for w in range(n_wind):
             if cnt_bp[d, w] > 0:
                 table_bp[d, w] = float(sum_bp[d, w] / cnt_bp[d, w])
+            if cnt_q10[d, w] > 0:
+                table_q10[d, w] = float(sum_q10[d, w] / cnt_q10[d, w])
             if cnt_q50[d, w] > 0:
                 table_q50[d, w] = float(sum_q50[d, w] / cnt_q50[d, w])
+            if cnt_q90[d, w] > 0:
+                table_q90[d, w] = float(sum_q90[d, w] / cnt_q90[d, w])
 
-    return BaselineB1(table_burn_prob=table_bp, table_q50=table_q50)
+    return BaselineB1(table_burn_prob=table_bp, table_q10=table_q10, table_q50=table_q50, table_q90=table_q90)
 
 
 def evaluate_model_on_dataset(

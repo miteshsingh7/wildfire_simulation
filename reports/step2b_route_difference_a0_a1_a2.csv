@@ -1,0 +1,5 @@
+agent,mean_distance_m,median_distance_m,mean_edge_count,median_edge_count,jaccard_overlap_with_a0,pred_margin_median,pred_margin_p10,pred_negative_count,truth_margin_median,truth_margin_p10,truth_negative_count
+A0 (Static),13936.9,14029.6,69.9,67.0,1.0,+inf,-inf,0/200 (0.0%),+inf,200.3 min,0/200 (0.0%)
+A1 (Reactive),11285.0,11512.5,35.1,30.0,0.487,+inf,-inf,25/200 (12.5%),+inf,-inf,25/200 (12.5%)
+A2-assim,12080.3,11718.0,40.9,34.0,0.499,+inf,-inf,3/200 (1.5%),+inf,-inf,2/200 (1.0%)
+A2-pure,12670.9,12514.6,51.4,41.0,0.6857,+inf,198.4 min,1/200 (0.5%),+inf,198.4 min,1/200 (0.5%)

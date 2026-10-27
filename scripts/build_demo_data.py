@@ -274,9 +274,13 @@ def main() -> None:
     # Simulate methods
     res_static, _ = run_static_baseline(origins, road_graph, destinations, truth_hazards)
 
-    prov_a2 = TeacherV2FieldProvider(assimilate=True)
-    harness_a2 = CausalReplayHarness(road_graph=road_graph, provider=prov_a2, latency_min=0.0)
-    res_a2, _ = run_agent_simulation("agent_a2", origins, road_graph, destinations, truth_hazards, harness_a2)
+    prov_a2_assim = TeacherV2FieldProvider(assimilate=True)
+    harness_a2_assim = CausalReplayHarness(road_graph=road_graph, provider=prov_a2_assim, latency_min=0.0)
+    res_a2_assim, _ = run_agent_simulation("agent_a2_assim", origins, road_graph, destinations, truth_hazards, harness_a2_assim)
+
+    prov_a2_pure = TeacherV2FieldProvider(assimilate=False)
+    harness_a2_pure = CausalReplayHarness(road_graph=road_graph, provider=prov_a2_pure, latency_min=0.0)
+    res_a2_pure, _ = run_agent_simulation("agent_a2_pure", origins, road_graph, destinations, truth_hazards, harness_a2_pure)
 
     prov_a3 = SurrogateFieldProvider(update_fields=surrogate_update_fields)
     harness_a3 = CausalReplayHarness(road_graph=road_graph, provider=prov_a3, latency_min=0.0)
@@ -331,10 +335,22 @@ def main() -> None:
                 "path": route_to_wgs84_coords(res_static[origins.index(orig)].route),
             },
             "agent_a2": {
-                "hazard_miss": bool(res_a2[origins.index(orig)].hazard_miss),
-                "margin_min": float(res_a2[origins.index(orig)].min_margin_min),
-                "trapped": res_a2[origins.index(orig)].route is None or not res_a2[origins.index(orig)].route.edges,
-                "path": route_to_wgs84_coords(res_a2[origins.index(orig)].route),
+                "hazard_miss": bool(res_a2_assim[origins.index(orig)].hazard_miss),
+                "margin_min": float(res_a2_assim[origins.index(orig)].min_margin_min),
+                "trapped": res_a2_assim[origins.index(orig)].route is None or not res_a2_assim[origins.index(orig)].route.edges,
+                "path": route_to_wgs84_coords(res_a2_assim[origins.index(orig)].route),
+            },
+            "agent_a2_assim": {
+                "hazard_miss": bool(res_a2_assim[origins.index(orig)].hazard_miss),
+                "margin_min": float(res_a2_assim[origins.index(orig)].min_margin_min),
+                "trapped": res_a2_assim[origins.index(orig)].route is None or not res_a2_assim[origins.index(orig)].route.edges,
+                "path": route_to_wgs84_coords(res_a2_assim[origins.index(orig)].route),
+            },
+            "agent_a2_pure": {
+                "hazard_miss": bool(res_a2_pure[origins.index(orig)].hazard_miss),
+                "margin_min": float(res_a2_pure[origins.index(orig)].min_margin_min),
+                "trapped": res_a2_pure[origins.index(orig)].route is None or not res_a2_pure[origins.index(orig)].route.edges,
+                "path": route_to_wgs84_coords(res_a2_pure[origins.index(orig)].route),
             },
             "agent_a3": {
                 "hazard_miss": bool(res_a3[origins.index(orig)].hazard_miss),
