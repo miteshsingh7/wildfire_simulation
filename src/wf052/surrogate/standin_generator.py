@@ -1,14 +1,19 @@
-"""Stand-in dataset generator for surrogate modeling (Phase 2A/2B).
+"""Stand-in dataset generator for surrogate modeling (Phase 2A/2B/2G).
 
 Generates 256x256 tiles at 60 m resolution exclusively from the 7 training-fire
 landscapes (never Camp Fire or Phase 1B held-out test fires).
 Simulates 12 h horizon fire propagation using stand-in sources:
 - wind_ellipse_analytic (closed-form Huygens expanding ellipse)
 - teacher_v1_cellular (cellular automaton / Rothermel percolation stand-in)
+- teacher_v2_ensemble (frozen multi-seed teacher ensemble)
 
 Every generated sample is tagged with 'scaffold' and the teacher config hash,
 and stores its generator source type.
 Supports stratified sampling to guarantee balanced spread regimes and prevent stalled runs.
+
+NOTE ON EVALUATION METRICS:
+No importance weights are used; evaluation metrics must be reported per bin,
+not as population averages.
 """
 
 import hashlib
@@ -566,12 +571,47 @@ def simulate_ensemble_teacher_v2(
         clean_arr = np.where(np.isnan(raw_arr) | (raw_arr > horizon_min), np.inf, raw_arr).astype(np.float32)
         arrival_runs.append(clean_arr)
 
-    # Compute burn_prob across runs
-    stacked = np.stack(arrival_runs, axis=0)  # (K, H, W)
+    bp, q10, q50, q90, c10, c50, c90 = compute_ensemble_quantiles_from_runs(
+        arrival_runs, horizon_min=horizon_min
+    )
+
+    return (
+        bp,
+        q10,
+        q50,
+        q90,
+        c10,
+        c50,
+        c90,
+        arrival_runs,
+    )
+
+
+def compute_ensemble_quantiles_from_runs(
+    arrival_runs: Sequence[np.ndarray],
+    horizon_min: float = 720.0,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Compute burn_prob, q10, q50, q90, c10, c50, c90 from list of K arrival time arrays."""
+    k_seeds = len(arrival_runs)
+    assert k_seeds > 0, "arrival_runs cannot be empty"
+
+    clean_runs = []
+    for raw_arr in arrival_runs:
+        clean = np.where(np.isnan(raw_arr) | (raw_arr > horizon_min), np.inf, raw_arr).astype(np.float32)
+        clean_runs.append(clean)
+
+    stacked = np.stack(clean_runs, axis=0)  # (K, H, W)
     burned_runs = np.isfinite(stacked) & (stacked <= horizon_min)
     burn_prob = np.mean(burned_runs, axis=0).astype(np.float32)
 
-    # Sort arrival times along K dimension for order statistics
     sorted_runs = np.sort(stacked, axis=0)  # (K, H, W)
 
     quantiles: dict[float, np.ndarray] = {}
@@ -598,24 +638,30 @@ def simulate_ensemble_teacher_v2(
         masks[0.1],
         masks[0.5],
         masks[0.9],
-        arrival_runs,
     )
 
 
-def assign_burn_fraction_bin(bf: float) -> int:
-    """Assign burned fraction in [0, 1] to one of 4 stratification bins:
-    0: [0.0, 0.2)
-    1: [0.2, 0.5)
-    2: [0.5, 0.9)
-    3: [0.9, 1.0]
+LEGACY_BIN_EDGES: tuple[float, ...] = (0.0, 0.2, 0.5, 0.9, 1.0)
+DEFAULT_5BIN_EDGES: tuple[float, ...] = (0.0, 0.002, 0.02, 0.1, 0.5, 1.0)
+
+
+def assign_burn_fraction_bin(
+    bf: float, bin_edges: Sequence[float] | None = None
+) -> int:
+    """Assign burned fraction in [0, 1] to bin index based on bin_edges.
+
+    If bin_edges is None, defaults to legacy 4 bins [0, 0.2, 0.5, 0.9, 1.0] for backwards compatibility.
     """
-    if bf < 0.2:
-        return 0
-    if bf < 0.5:
-        return 1
-    if bf < 0.9:
-        return 2
-    return 3
+    edges = bin_edges if bin_edges is not None else LEGACY_BIN_EDGES
+    n_bins = len(edges) - 1
+    for i in range(n_bins):
+        if i == n_bins - 1:
+            if edges[i] <= bf <= edges[i + 1]:
+                return i
+        else:
+            if edges[i] <= bf < edges[i + 1]:
+                return i
+    return max(0, min(n_bins - 1, int(np.digitize(bf, edges) - 1)))
 
 
 def compute_stratified_histogram(
@@ -739,6 +785,9 @@ class RejectionSamplingReport:
     max_attempts: int
     cap_reached: bool
     unfilled_messages: list[str]
+    fire_bin_counts: dict[str, list[int]] | None = None
+    fire_bin_attempts: dict[str, list[int]] | None = None
+    fire_group0_rejections: dict[str, int] | None = None
 
     def to_markdown(self) -> str:
         """Format report as a clean markdown table."""
@@ -835,9 +884,16 @@ def sample_to_metadata_dict(sample: SurrogateSample, shard_id: str) -> dict[str,
         "q90_burned_fraction": round(q90_burned, 4),
         "runs_differ": runs_differ,
         "k_ensemble": int(k_ens),
+        "K": int(k_ens),
         "teacher_config_hash": cfg_hash,
         "canonical_sim_hash": sim_hash,
         "bin": bin_idx,
+        "bin_k1": int(getattr(sample, "bin_k1", bin_idx)),
+        "burned_fraction_k1": round(float(getattr(sample, "burned_fraction_k1", burned_frac)), 4),
+        "burned_fraction_kmean": round(float(getattr(sample, "burned_fraction_kmean", burn_prob_mean)), 4),
+        "bin_kmean": int(getattr(sample, "bin_kmean", bin_idx)),
+        "attempts_in_bin": int(getattr(sample, "attempts_in_bin", 0)),
+        "seed_list": str(getattr(sample, "seed_list", [sample.seed])),
         "shard_id": shard_id,
         "schema_version": SCHEMA_VERSION,
         "git_commit": commit_str,
@@ -1063,11 +1119,6 @@ def load_shard_samples(
         )
         samples.append(sample)
     return samples
-    df = pd.DataFrame(rows)
-    csv_path = shards_dir / f"{shard_id}_metadata.csv"
-    df.to_csv(csv_path, index=False)
-
-    return df
 
 
 def compute_wind_distribution_table(
@@ -1140,15 +1191,54 @@ def compute_burned_fraction_by_wind_bin(
     return "\n".join(lines)
 
 
+def format_fire_bin_table(
+    fire_names: Sequence[str],
+    bin_names: Sequence[str],
+    quotas_per_fire: dict[str, list[int]],
+    accepted_by_fire_bin: dict[str, list[int]],
+    attempts_by_fire_bin: dict[str, list[int]],
+) -> str:
+    """Format per-fire x bin table showing target, accepted, and attempts."""
+    header = ["Fire"] + [f"Bin {b} ({b_name})" for b, b_name in enumerate(bin_names)] + ["Total Acc / Tgt"]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| :--- | " + " | ".join([":---:"] * len(bin_names)) + " | :---: |",
+    ]
+    total_acc_all = 0
+    total_tgt_all = 0
+    for f in fire_names:
+        row_cells = []
+        f_acc = sum(accepted_by_fire_bin.get(f, []))
+        f_tgt = sum(quotas_per_fire.get(f, []))
+        total_acc_all += f_acc
+        total_tgt_all += f_tgt
+        for b in range(len(bin_names)):
+            tgt = quotas_per_fire.get(f, [0] * len(bin_names))[b]
+            acc = accepted_by_fire_bin.get(f, [0] * len(bin_names))[b]
+            att = attempts_by_fire_bin.get(f, [0] * len(bin_names))[b]
+            row_cells.append(f"{acc}/{tgt} ({att} att)")
+        lines.append(f"| `{f}` | " + " | ".join(row_cells) + f" | {f_acc}/{f_tgt} |")
+
+    lines.append(
+        "| **Total** | "
+        + " | ".join(
+            f"{sum(accepted_by_fire_bin.get(f, [0] * len(bin_names))[b] for f in fire_names)}/{sum(quotas_per_fire.get(f, [0] * len(bin_names))[b] for f in fire_names)}"
+            for b in range(len(bin_names))
+        )
+        + f" | **{total_acc_all}/{total_tgt_all}** |"
+    )
+    return "\n".join(lines)
+
+
 def generate_stratified_samples_rejection(
     fire_names: Sequence[str] | None = None,
-    target_quotas: dict[str | int, int] | Sequence[int] | None = None,
+    target_quotas: dict[str, Any] | Sequence[int] | dict[str | int, int] | None = None,
     total_samples: int | None = None,
     max_attempts: int | None = None,
     base_seed: int = 42000,
     tile_size: tuple[int, int] = (256, 256),
     source_mode: str = "teacher_v2_ensemble",
-    k_ensemble: int = 16,
+    k_ensemble: int | None = None,
     horizon_min: float = 720.0,
     scenarios_config_path: str | Path = "configs/scenarios.yaml",
     teacher_config_path: str | Path | None = None,
@@ -1157,71 +1247,103 @@ def generate_stratified_samples_rejection(
     max_attempts_per_bin: int | None = None,
     max_wall_sec: float | None = None,
     progress_interval: int = 5,
+    mode: str = "smoke",
+    scenarios_per_fire: int | None = None,
 ) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
-    """Generate training samples using rejection sampling against burned-fraction bin quotas.
+    """Generate training samples using round-robin stratified rejection sampling.
 
-    Each burned-fraction bin has a quota. The generator keeps sampling candidates with unique
-    seeds until every bin is full or max_attempts is reached. Never duplicates a sample.
+    Each fire domain is visited round-robin. Within each fire, any bin below quota can accept.
+    Candidates are drawn:
+    1. If ignition cell fuel group == 0 (non-burnable/water), candidate is rejected without teacher run.
+    2. Runs K=1 prescreen simulation with seed_0.
+    3. Assigns burned fraction bin from K=1 run.
+    4. If active fire's bin quota is open:
+       Accepts candidate, runs remaining seeds 1..K-1, reusing seed_0 run as member 0 bit for bit.
+       Advances round-robin pointer to next fire!
+    5. If quota is full:
+       Rejects candidate and tries another candidate.
 
-    Bins:
-    - 0: [0.0, 0.2)
-    - 1: [0.2, 0.5)
-    - 2: [0.5, 0.9)
-    - 3: [0.9, 1.0]
+    NOTE ON EVALUATION METRICS:
+    No importance weights are used; evaluation metrics must be reported per bin,
+    not as population averages.
 
     Returns:
         (accepted_samples, rejection_report)
     """
     if fire_names is None:
-        fire_names = SEVEN_TRAINING_FIRES
+        fire_names = list(SEVEN_TRAINING_FIRES)
 
     cfg = load_held_out_fire_exclusions(scenarios_config_path)
     strat_cfg = cfg.get("stratified_sampling", {})
 
-    # Determine bin quotas [q0, q1, q2, q3]
-    bin_names = ["0-0.2", "0.2-0.5", "0.5-0.9", ">0.9"]
-    bin_ranges = [(0.0, 0.2), (0.2, 0.5), (0.5, 0.9), (0.9, 1.0)]
+    # Defaults for k_ensemble
+    if k_ensemble is None:
+        if "K_ENSEMBLE" in os.environ:
+            k_ensemble = int(os.environ["K_ENSEMBLE"])
+        else:
+            k_ensemble = int(strat_cfg.get("smoke_k_ensemble", 4) if mode == "smoke" else strat_cfg.get("full_k_ensemble", 16))
 
-    quotas = [0, 0, 0, 0]
+    # Defaults for scenarios_per_fire
+    if scenarios_per_fire is None:
+        if "SCENARIOS_PER_FIRE" in os.environ:
+            scenarios_per_fire = int(os.environ["SCENARIOS_PER_FIRE"])
+        else:
+            scenarios_per_fire = int(strat_cfg.get("smoke_per_fire", 2) if mode == "smoke" else strat_cfg.get("full_per_fire", 200))
+
+    # Bin configuration
+    if target_quotas is not None and isinstance(target_quotas, (list, tuple)) and len(target_quotas) == 4:
+        bin_edges = [0.0, 0.2, 0.5, 0.9, 1.0]
+        bin_names = ["0-0.2", "0.2-0.5", "0.5-0.9", ">0.9"]
+        bin_ranges = [(0.0, 0.2), (0.2, 0.5), (0.5, 0.9), (0.9, 1.0)]
+        target_proportions = [0.25, 0.25, 0.25, 0.25]
+    else:
+        bin_edges = list(strat_cfg.get("bin_edges", [0.0, 0.002, 0.02, 0.1, 0.5, 1.0]))
+        bin_names = list(strat_cfg.get("bin_names", ["[0, 0.002)", "[0.002, 0.02)", "[0.02, 0.1)", "[0.1, 0.5)", "[0.5, 1.0]"]))
+        bin_ranges = [(float(bin_edges[i]), float(bin_edges[i + 1])) for i in range(len(bin_edges) - 1)]
+        target_proportions = list(strat_cfg.get("target_proportions", [0.10, 0.20, 0.25, 0.25, 0.20]))
+    num_bins = len(bin_ranges)
+
+    # Determine per-fire quotas
+    quotas_per_fire: dict[str, list[int]] = {}
     if target_quotas is not None:
-        if isinstance(target_quotas, Sequence):
-            quotas = [int(q) for q in target_quotas[:4]]
+        if isinstance(target_quotas, dict) and any(f in target_quotas for f in fire_names):
+            for f in fire_names:
+                f_q = target_quotas.get(f, [0] * num_bins)
+                if isinstance(f_q, dict):
+                    quotas_per_fire[f] = [int(f_q.get(b, 0)) for b in range(num_bins)]
+                else:
+                    quotas_per_fire[f] = [int(q) for q in f_q[:num_bins]]
+        elif isinstance(target_quotas, (list, tuple)):
+            for f in fire_names:
+                quotas_per_fire[f] = [int(q) for q in target_quotas[:num_bins]]
         elif isinstance(target_quotas, dict):
             key_map = {
-                0: 0,
-                1: 1,
-                2: 2,
-                3: 3,
-                "0": 0,
-                "1": 1,
-                "2": 2,
-                "3": 3,
-                "bin_0_0_2": 0,
-                "bin_0_2_0_5": 1,
-                "bin_0_5_0_9": 2,
-                "bin_above_0_9": 3,
-                "0-0.2": 0,
-                "0.2-0.5": 1,
-                "0.5-0.9": 2,
-                ">0.9": 3,
+                0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
+                "0": 0, "1": 1, "2": 2, "3": 3, "4": 4,
+                "bin_0_0_2": 0, "bin_0_2_0_5": 1, "bin_0_5_0_9": 2, "bin_above_0_9": 3,
             }
+            q_list = [0] * num_bins
             for k, val in target_quotas.items():
-                if k in key_map:
-                    quotas[key_map[k]] = int(val)
+                if k in key_map and key_map[k] < num_bins:
+                    q_list[key_map[k]] = int(val)
+            for f in fire_names:
+                quotas_per_fire[f] = list(q_list)
     elif total_samples is not None:
-        props = strat_cfg.get("target_proportions", [0.25, 0.25, 0.25, 0.25])
-        quotas = [int(round(total_samples * p)) for p in props]
+        per_fire = max(1, total_samples // len(fire_names))
+        q_list = [int(round(per_fire * p)) for p in target_proportions]
+        for f in fire_names:
+            quotas_per_fire[f] = list(q_list)
     else:
-        cfg_quotas = strat_cfg.get("bin_quotas", {})
-        quotas = [
-            int(cfg_quotas.get("bin_0_0_2", 25)),
-            int(cfg_quotas.get("bin_0_2_0_5", 25)),
-            int(cfg_quotas.get("bin_0_5_0_9", 25)),
-            int(cfg_quotas.get("bin_above_0_9", 25)),
-        ]
+        if scenarios_per_fire <= num_bins:
+            for f in fire_names:
+                quotas_per_fire[f] = [int(scenarios_per_fire)] * num_bins
+        else:
+            q_list = [int(round(scenarios_per_fire * p)) for p in target_proportions]
+            for f in fire_names:
+                quotas_per_fire[f] = list(q_list)
 
     if max_attempts is None:
-        max_attempts = int(strat_cfg.get("max_rejection_attempts", 2000))
+        max_attempts = int(strat_cfg.get("max_rejection_attempts", 3000))
 
     if device is None:
         device = torch.device(
@@ -1269,27 +1391,64 @@ def generate_stratified_samples_rejection(
             }
         )
 
+    n_fires = len(cached_fires)
     accepted_samples: list[SurrogateSample] = []
-    bin_accepted: list[list[SurrogateSample]] = [[], [], [], []]
-    bin_generated: list[int] = [0, 0, 0, 0]
-    bin_rejected: list[int] = [0, 0, 0, 0]
+    accepted_by_fire: dict[str, list[SurrogateSample]] = {f: [] for f in fire_names}
+    accepted_by_fire_bin: dict[str, list[int]] = {f: [0] * num_bins for f in fire_names}
+    attempts_by_fire_bin: dict[str, list[int]] = {f: [0] * num_bins for f in fire_names}
+    group0_rejections_by_fire: dict[str, int] = {f: 0 for f in fire_names}
 
+    current_fire_idx = 0
+    attempt = 0
     t0_rejection = time.perf_counter()
-    last_progress_count = 0
     attempt_durations: list[float] = []
+    last_progress_count = 0
 
-    for attempt in range(max_attempts):
-        if all(len(bin_accepted[b]) >= quotas[b] for b in range(4) if quotas[b] > 0):
+    def fire_is_open(f: str) -> bool:
+        for b in range(num_bins):
+            q = quotas_per_fire[f][b]
+            if q > 0 and accepted_by_fire_bin[f][b] < q:
+                if max_attempts_per_bin is None or attempts_by_fire_bin[f][b] < max_attempts_per_bin:
+                    return True
+        return False
+
+    while True:
+        # Check if all fires have fulfilled quotas or capped attempts
+        if not any(fire_is_open(f) for f in fire_names):
             break
 
+        # Check total attempts cap
+        if max_attempts is not None and attempt >= max_attempts:
+            logger.warning("Max attempts of %d reached in generate_stratified_samples_rejection.", max_attempts)
+            print(f"Max attempts cap of {max_attempts} reached. Stopping cleanly.", flush=True)
+            break
+
+        # Check wall-clock cap
+        if max_wall_sec is not None and (time.perf_counter() - t0_rejection) >= max_wall_sec:
+            logger.warning("Wall-clock cap of %.1f s reached in generate_stratified_samples_rejection (%d attempts).", max_wall_sec, attempt)
+            print(f"Wall-clock cap of {max_wall_sec / 60.0:.1f} minutes reached. Stopping cleanly.", flush=True)
+            break
+
+        # Advance current_fire_idx to the next open fire in round-robin order
+        found_open = False
+        for step in range(n_fires):
+            idx = (current_fire_idx + step) % n_fires
+            if fire_is_open(fire_names[idx]):
+                current_fire_idx = idx
+                found_open = True
+                break
+
+        if not found_open:
+            break
+
+        active_fire = fire_names[current_fire_idx]
+        f_info = cached_fires[current_fire_idx]
+
         t_att0 = time.perf_counter()
+        attempt += 1
 
-        f_idx = attempt % len(cached_fires)
-        f_info = cached_fires[f_idx]
-        fire = f_info["fire"]
-
-        seed = base_seed + attempt * 17
-        rng = np.random.RandomState(seed)
+        candidate_seed = base_seed + attempt * 17
+        rng = np.random.RandomState(candidate_seed)
 
         wind_base = sample_hrrr_wind_series(
             fire_dir=f_info["fire_dir"],
@@ -1317,46 +1476,48 @@ def generate_stratified_samples_rejection(
             offset_c=ign_offset_c,
         )
 
+        # STEP 3 RULE: "REJECT if ignition fuel group == 0 (no teacher run)"
+        fuel_grp_at_ign = int(f_info["fuel_grp"][ign_r, ign_c])
+        if fuel_grp_at_ign == 0:
+            group0_rejections_by_fire[active_fire] += 1
+            att_dur = time.perf_counter() - t_att0
+            attempt_durations.append(att_dur)
+            continue
+
+        # Setup ignition mask
         ign_mask = np.zeros(tile_size, dtype=np.float32)
         r_lo, r_hi = max(0, ign_r - 1), min(tile_size[0], ign_r + 2)
         c_lo, c_hi = max(0, ign_c - 1), min(tile_size[1], ign_c + 2)
         ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
 
-        burn_prob = None
-        q10, q50, q90 = None, None, None
-        c10, c50, c90 = None, None, None
+        seed_0 = int(candidate_seed % 2_147_483_647)
 
+        # STEP 3 RULE: Run K=1 prescreen with seed_0
         if source_mode in ("teacher_v2_ensemble", "teacher_v2_embers"):
             ds_tile = build_tile_fire_dataset_60m(
-                fire_name=fire,
+                fire_name=active_fire,
                 fbfm_arr=f_info["fbfm"],
                 elev_arr=f_info["elev"],
                 canopy_arr=f_info["canopy"],
                 hourly_wind_uv=hourly_wind_perturbed,
                 device=device,
             )
-            (
-                burn_prob,
-                q10,
-                q50,
-                q90,
-                c10,
-                c50,
-                c90,
-                _,
-            ) = simulate_ensemble_teacher_v2(
+            sim_out_0 = simulate_teacher_with_embers_60m(
                 ds=ds_tile,
-                t_params=t_params,
-                e_params=e_params,
-                ign_mask=ign_mask,
-                k_seeds=k_ensemble,
-                scenario_seed=seed,
-                horizon_min=horizon_min,
+                params=t_params,
+                ember_params=e_params,
+                use_ember_kernel=True,
+                duration_hours=int(np.ceil(horizon_min / 60.0)),
+                steps_per_hour=30,
+                seed=seed_0,
+                init_burned_mask=ign_mask.astype(bool),
             )
-            arr_time = q50
-            c_mask = c50
+            raw_arr_0 = sim_out_0["arrival_time_min"]
+            clean_arr_0 = np.where(np.isnan(raw_arr_0) | (raw_arr_0 > horizon_min), np.inf, raw_arr_0).astype(np.float32)
+            c50_k1 = (np.isinf(clean_arr_0) | np.isnan(clean_arr_0) | (clean_arr_0 > horizon_min)).astype(np.float32)
+            bf_k1 = float(np.mean(c50_k1 < 0.5))
         elif source_mode == "teacher_v1_cellular":
-            arr_time, c_mask = simulate_cellular_standin_arrival(
+            arr_time_0, c_mask_0 = simulate_cellular_standin_arrival(
                 fuel_group=f_info["fuel_grp"],
                 hourly_wind_uv=hourly_wind_perturbed,
                 ign_r=ign_r,
@@ -1365,12 +1526,11 @@ def generate_stratified_samples_rejection(
                 horizon_min=horizon_min,
                 speed_multiplier=spd_mult,
             )
-            burn_prob = (1.0 - c_mask).astype(np.float32)
-            q10, q50, q90 = arr_time, arr_time, arr_time
-            c10, c50, c90 = c_mask, c_mask, c_mask
+            clean_arr_0 = np.where(c_mask_0 >= 0.5, np.inf, arr_time_0).astype(np.float32)
+            bf_k1 = float(np.mean(c_mask_0 < 0.5))
         else:
             lb_jitter = float(rng.uniform(-0.3, 0.3))
-            arr_time, c_mask = generate_analytic_arrival_surface(
+            arr_time_0, c_mask_0 = generate_analytic_arrival_surface(
                 fuel_group=f_info["fuel_grp"],
                 hourly_wind_uv=hourly_wind_perturbed,
                 ign_r=ign_r,
@@ -1380,19 +1540,69 @@ def generate_stratified_samples_rejection(
                 speed_multiplier=spd_mult,
                 length_to_breadth=2.5 + lb_jitter,
             )
-            burn_prob = (1.0 - c_mask).astype(np.float32)
-            q10, q50, q90 = arr_time, arr_time, arr_time
-            c10, c50, c90 = c_mask, c_mask, c_mask
+            clean_arr_0 = np.where(c_mask_0 >= 0.5, np.inf, arr_time_0).astype(np.float32)
+            bf_k1 = float(np.mean(c_mask_0 < 0.5))
 
-        bf = float(np.mean(c_mask < 0.5))
-        bin_idx = assign_burn_fraction_bin(bf)
-        bin_generated[bin_idx] += 1
+        # STEP 3 RULE: Assign bin from K=1 burned fraction
+        bin_k1 = assign_burn_fraction_bin(bf_k1, bin_edges=bin_edges)
+        attempts_by_fire_bin[active_fire][bin_k1] += 1
 
-        if len(bin_accepted[bin_idx]) < quotas[bin_idx]:
-            sample_id = f"{fire}_member_{len(accepted_samples):04d}_{source_mode}"
+        # STEP 3 RULE: Accept if fire's bin quota is open
+        quota_val = quotas_per_fire[active_fire][bin_k1]
+        is_open = (
+            accepted_by_fire_bin[active_fire][bin_k1] < quota_val
+            and (max_attempts_per_bin is None or attempts_by_fire_bin[active_fire][bin_k1] <= max_attempts_per_bin)
+        )
+
+        if is_open:
+            # STEP 3 RULE: reuse seed_0 as ensemble member 0 bit for bit!
+            arrival_runs = [clean_arr_0]
+            seed_list = [seed_0]
+
+            if source_mode in ("teacher_v2_ensemble", "teacher_v2_embers"):
+                for k in range(1, k_ensemble):
+                    seed_k = int((candidate_seed + k * 10007) % 2_147_483_647)
+                    seed_list.append(seed_k)
+                    sim_out_k = simulate_teacher_with_embers_60m(
+                        ds=ds_tile,
+                        params=t_params,
+                        ember_params=e_params,
+                        use_ember_kernel=True,
+                        duration_hours=int(np.ceil(horizon_min / 60.0)),
+                        steps_per_hour=30,
+                        seed=seed_k,
+                        init_burned_mask=ign_mask.astype(bool),
+                    )
+                    raw_arr_k = sim_out_k["arrival_time_min"]
+                    clean_arr_k = np.where(
+                        np.isnan(raw_arr_k) | (raw_arr_k > horizon_min), np.inf, raw_arr_k
+                    ).astype(np.float32)
+                    arrival_runs.append(clean_arr_k)
+
+                bp, q10, q50, q90, c10, c50, c90 = compute_ensemble_quantiles_from_runs(
+                    arrival_runs, horizon_min=horizon_min
+                )
+                arr_time = q50
+                c_mask = c50
+            else:
+                for k in range(1, k_ensemble):
+                    seed_k = int((candidate_seed + k * 10007) % 2_147_483_647)
+                    seed_list.append(seed_k)
+                    arrival_runs.append(clean_arr_0)
+
+                c_mask = (clean_arr_0 == np.inf).astype(np.float32)
+                arr_time = np.where(c_mask >= 0.5, horizon_min, clean_arr_0).astype(np.float32)
+                bp = (1.0 - c_mask).astype(np.float32)
+                q10, q50, q90 = arr_time, arr_time, arr_time
+                c10, c50, c90 = c_mask, c_mask, c_mask
+
+            burned_fraction_kmean = float(np.mean(bp))
+            bin_kmean = assign_burn_fraction_bin(burned_fraction_kmean, bin_edges=bin_edges)
+
+            sample_id = f"{active_fire}_member_{len(accepted_samples):04d}_{source_mode}"
             scaffold_tag = f"scaffold_{sim_hash[:12]}"
             sample = SurrogateSample(
-                fire_name=fire,
+                fire_name=active_fire,
                 sample_id=sample_id,
                 fuel_group=f_info["fuel_grp"],
                 slope=f_info["slope"],
@@ -1405,10 +1615,10 @@ def generate_stratified_samples_rejection(
                 target_arrival_time=arr_time,
                 censor_mask=c_mask,
                 scaffold_tag=scaffold_tag,
-                seed=seed,
+                seed=candidate_seed,
                 source=source_mode,
                 baseline_only=(source_mode == "analytic_wind_ellipse"),
-                burn_prob=burn_prob,
+                burn_prob=bp,
                 arrival_q10=q10,
                 arrival_q50=q50,
                 arrival_q90=q90,
@@ -1418,67 +1628,53 @@ def generate_stratified_samples_rejection(
                 k_ensemble=k_ensemble,
                 teacher_config_hash=cfg_hash,
                 canonical_sim_hash=sim_hash,
+                fire_id=active_fire,
+                tile_id=f"{active_fire}_tile0",
+                crop_origin=(0, 0),
+                ignition_cell=(ign_r, ign_c),
+                bin_k1=bin_k1,
+                burned_fraction_k1=bf_k1,
+                burned_fraction_kmean=burned_fraction_kmean,
+                bin_kmean=bin_kmean,
+                attempts_in_bin=attempts_by_fire_bin[active_fire][bin_k1],
+                seed_list=seed_list,
             )
-            bin_accepted[bin_idx].append(sample)
+
             accepted_samples.append(sample)
-        else:
-            bin_rejected[bin_idx] += 1
+            accepted_by_fire[active_fire].append(sample)
+            accepted_by_fire_bin[active_fire][bin_k1] += 1
+
+            # STEP 3 RULE: Advance round-robin pointer to next fire!
+            current_fire_idx = (current_fire_idx + 1) % n_fires
 
         att_dur = time.perf_counter() - t_att0
         attempt_durations.append(att_dur)
 
-        # Progress reporting every progress_interval accepted samples
         if progress_interval > 0 and len(accepted_samples) >= last_progress_count + progress_interval:
             last_progress_count = (len(accepted_samples) // progress_interval) * progress_interval
             avg_sec = float(np.mean(attempt_durations[-progress_interval:])) if attempt_durations else 0.0
             elapsed_cur = time.perf_counter() - t0_rejection
+            tot_target = sum(sum(q) for q in quotas_per_fire.values())
             print(
-                f"[Progress] Accepted: {len(accepted_samples)}/{sum(quotas)} | "
-                f"Attempts per bin: {bin_generated} | Rejections: {bin_rejected} | "
-                f"Sec/attempt: {avg_sec:.2f} s | Elapsed: {elapsed_cur:.1f} s",
+                f"[Progress] Accepted: {len(accepted_samples)}/{tot_target} | "
+                f"Attempts: {attempt} | Sec/attempt: {avg_sec:.2f} s | Elapsed: {elapsed_cur:.1f} s",
                 flush=True,
             )
 
-        # Check wall-clock cap
-        if max_wall_sec is not None and (time.perf_counter() - t0_rejection) >= max_wall_sec:
-            logger.warning(
-                "Wall-clock cap of %.1f s reached in generate_stratified_samples_rejection (%d attempts).",
-                max_wall_sec,
-                attempt + 1,
-            )
-            print(f"Wall-clock cap of {max_wall_sec/60.0:.1f} minutes reached. Stopping search cleanly.", flush=True)
-            break
-
-        # Check per-bin attempt cap
-        if max_attempts_per_bin is not None:
-            unfilled_bins = [b for b in range(4) if len(bin_accepted[b]) < quotas[b] and quotas[b] > 0]
-            if any(bin_generated[b] >= max_attempts_per_bin for b in unfilled_bins):
-                logger.warning(
-                    "Per-bin attempt cap of %d reached for unfilled bin(s) %s.",
-                    max_attempts_per_bin,
-                    unfilled_bins,
-                )
-                print(
-                    f"Per-bin attempt cap of {max_attempts_per_bin} reached for unfilled bin(s). Stopping search cleanly.",
-                    flush=True,
-                )
-                break
-
     stats: list[BinRejectionStats] = []
     unfilled_messages: list[str] = []
-    for b in range(4):
-        target = quotas[b]
-        unique_cnt = len(bin_accepted[b])
-        gen = bin_generated[b]
-        rej = bin_rejected[b]
+    for b in range(num_bins):
+        target = sum(quotas_per_fire[f][b] for f in fire_names)
+        unique_cnt = sum(accepted_by_fire_bin[f][b] for f in fire_names)
+        gen = sum(attempts_by_fire_bin[f][b] for f in fire_names)
+        rej = gen - unique_cnt
         filled = unique_cnt >= target
         if not filled and target > 0:
             msg = (
-                f"Bin '{bin_names[b]}' could not be filled within the cap of {max_attempts} attempts "
-                f"(target: {target}, generated in bin: {gen}, reached: {unique_cnt}, deficit: {target - unique_cnt})."
+                f"Bin '{bin_names[b]}' could not be filled within the cap "
+                f"(target: {target}, reached: {unique_cnt}, deficit: {target - unique_cnt})."
             )
             unfilled_messages.append(msg)
-            logger.warning(msg)
         stats.append(
             BinRejectionStats(
                 bin_name=bin_names[b],
@@ -1491,14 +1687,26 @@ def generate_stratified_samples_rejection(
             )
         )
 
+    tbl_str = format_fire_bin_table(
+        fire_names=fire_names,
+        bin_names=bin_names,
+        quotas_per_fire=quotas_per_fire,
+        accepted_by_fire_bin=accepted_by_fire_bin,
+        attempts_by_fire_bin=attempts_by_fire_bin,
+    )
+    print("\n--- Per Fire x Bin Table (Target, Accepted, Attempts) ---\n" + tbl_str + "\n", flush=True)
+
     report = RejectionSamplingReport(
         stats=stats,
-        total_generated=sum(bin_generated),
+        total_generated=attempt,
         total_accepted=len(accepted_samples),
-        total_rejected=sum(bin_rejected),
-        max_attempts=max_attempts,
+        total_rejected=attempt - len(accepted_samples),
+        max_attempts=max_attempts if max_attempts is not None else attempt,
         cap_reached=any(not s.filled for s in stats if s.target > 0),
         unfilled_messages=unfilled_messages,
+        fire_bin_counts=accepted_by_fire_bin,
+        fire_bin_attempts=attempts_by_fire_bin,
+        fire_group0_rejections=group0_rejections_by_fire,
     )
 
     return accepted_samples, report

@@ -154,6 +154,13 @@ class SurrogateSample:
     ignition_cell: tuple[int, int] = (128, 128)
     schema_version: str = SCHEMA_VERSION
     git_commit: str = ""
+    # Sampler redesign metadata (Phase 2G)
+    bin_k1: int = 0
+    burned_fraction_k1: float = 0.0
+    burned_fraction_kmean: float = 0.0
+    bin_kmean: int = 0
+    attempts_in_bin: int = 0
+    seed_list: list[int] | None = None
 
 
 @dataclass(frozen=True)

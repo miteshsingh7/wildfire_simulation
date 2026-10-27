@@ -125,6 +125,7 @@ class SurrogateMultiTaskLoss(nn.Module):
         censor_mask: torch.Tensor | None = None,
         target_quantiles: torch.Tensor | None = None,
         censor_quantiles: torch.Tensor | None = None,
+        burn_prob: torch.Tensor | None = None,
     ) -> LossBreakdown:
         """Forward loss calculation.
 
@@ -135,6 +136,7 @@ class SurrogateMultiTaskLoss(nn.Module):
             censor_mask: (B, H, W) median censor mask {0, 1} (optional fallback)
             target_quantiles: (B, 3, H, W) arrival times in minutes per quantile [q10, q50, q90]
             censor_quantiles: (B, 3, H, W) censor masks per quantile (1=censored, 0=burned)
+            burn_prob: (B, H, W) or (B, 1, H, W) soft target probability of burning by horizon in [0, 1]
 
         Returns:
             LossBreakdown with individual and total loss scalars.
@@ -151,8 +153,11 @@ class SurrogateMultiTaskLoss(nn.Module):
             l_q50 = self.pinball_q50(pred_norm[:, 1, :, :], t_norm[:, 1, :, :], mask_q[:, 1, :, :])
             l_q90 = self.pinball_q90(pred_norm[:, 2, :, :], t_norm[:, 2, :, :], mask_q[:, 2, :, :])
 
-            # Target for horizon burn: burned at median (q50) by horizon
-            target_burned = mask_q[:, 1, :, :].unsqueeze(1)
+            # Target for horizon burn: soft burn_prob if provided, else q50 burned mask
+            if burn_prob is not None:
+                target_burned = burn_prob.unsqueeze(1) if burn_prob.dim() == 3 else burn_prob
+            else:
+                target_burned = mask_q[:, 1, :, :].unsqueeze(1)
         else:
             if target_arrival is None or censor_mask is None:
                 raise ValueError("Must provide either (target_quantiles, censor_quantiles) or (target_arrival, censor_mask)")
@@ -163,7 +168,10 @@ class SurrogateMultiTaskLoss(nn.Module):
             l_q50 = self.pinball_q50(pred_norm[:, 1, :, :], t_norm, uncensored_mask)
             l_q90 = self.pinball_q90(pred_norm[:, 2, :, :], t_norm, uncensored_mask)
 
-            target_burned = uncensored_mask.unsqueeze(1)
+            if burn_prob is not None:
+                target_burned = burn_prob.unsqueeze(1) if burn_prob.dim() == 3 else burn_prob
+            else:
+                target_burned = uncensored_mask.unsqueeze(1)
 
         pinball_total = (l_q10 + l_q50 + l_q90) / 3.0
 
