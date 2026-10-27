@@ -1,0 +1,14 @@
+channel_idx,channel_name,train_min,train_max,camp_min,camp_max
+0,ch00_fuel_grp0_nonburnable,0.0,1.0,0.0,1.0
+1,ch01_fuel_grp1_grass,0.0,1.0,0.0,1.0
+2,ch02_fuel_grp2_grass_shrub,0.0,1.0,0.0,1.0
+3,ch03_fuel_grp3_shrub,0.0,1.0,0.0,1.0
+4,ch04_fuel_grp4_timber_understory,0.0,1.0,0.0,1.0
+5,ch05_fuel_grp5_timber_litter,0.0,1.0,0.0,1.0
+6,ch06_fuel_grp6_slash_blowdown,0.0,1.0,0.0,0.0
+7,ch07_slope_rad,0.0,1.0064327716827393,0.0,1.0344688892364502
+8,ch08_aspect_sin,-1.0,1.0,-1.0,1.0
+9,ch09_aspect_cos,-1.0,1.0,-1.0,1.0
+10,ch10_elevation_zscore,-2.917757749557495,3.9193291664123535,-3.0161831378936768,3.3189799785614014
+11,ch11_canopy_cover,0.0,0.8500000238418579,0.0,0.75
+12,ch12_ignition_mask,0.0,1.0,0.0,1.0

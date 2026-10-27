@@ -25,6 +25,7 @@ from wf052.replay.metrics import (
     compute_warning_lead_time,
 )
 from wf052.replay.providers import (
+    DynamicTeacherV2Provider,
     FieldProvider,
     ObservationInflatedProvider,
     SurrogateFieldProvider,
@@ -35,6 +36,7 @@ from wf052.replay.providers import (
 __all__ = [
     "CausalReplayHarness",
     "CausalStepEnvironment",
+    "DynamicTeacherV2Provider",
     "EvacuationOrigin",
     "FieldProvider",
     "MethodMetrics",

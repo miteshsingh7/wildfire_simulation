@@ -1,0 +1,2 @@
+checkpoint,weights_status,device,n_samples,tile_lat_mean_ms,tile_lat_p50_ms,tile_lat_p95_ms,tile_lat_min_ms,tile_lat_max_ms,surrogate_9tile_full_domain_ms,teacher_v2_domain_ms,speedup_vs_teacher_v2
+checkpoints/best.pt,STAND-IN WEIGHTS (Phase 3A Smoke),mps,100,51.43,44.99,70.55,35.87,186.71,462.85,3980.0,8.6

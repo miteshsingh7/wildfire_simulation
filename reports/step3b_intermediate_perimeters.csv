@@ -1,0 +1,5 @@
+horizon_hours,horizon_min,cells,area_ha,geojson_saved,observed_intermediate_perimeter
++1 h,60.0,0,0.0,out/demo/perimeters/surrogate_perimeter_1h.geojson,NONE EXIST IN REPO DATA
++2 h,120.0,0,0.0,out/demo/perimeters/surrogate_perimeter_2h.geojson,NONE EXIST IN REPO DATA
++4 h,240.0,0,0.0,out/demo/perimeters/surrogate_perimeter_4h.geojson,NONE EXIST IN REPO DATA
++6 h,360.0,2775,999.0,out/demo/perimeters/surrogate_perimeter_6h.geojson,NONE EXIST IN REPO DATA

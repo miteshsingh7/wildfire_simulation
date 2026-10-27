@@ -1,0 +1,3 @@
+comparison,diff_observed_pct,cluster_bootstrap_95ci,conclusion
+A3 (Surrogate) vs A2 (Teacher v2),+3.50%,"[-2.38%, +7.53%]",INCONCLUSIVE (CI includes zero)
+B-on-A3 (Obs on Surrogate) vs Static,-12.00%,"[-18.46%, +4.76%]",INCONCLUSIVE (CI includes zero)

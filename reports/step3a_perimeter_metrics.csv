@@ -1,0 +1,3 @@
+model,sim_area_ha,area_ratio,iou,recall,precision,notes
+Surrogate (STAND-IN Phase 3A Smoke),114108.5,5.1498,0.1942,100.00%,19.42%,"Single forward pass (462.8 ms), p_thr=0.1, t<=684min"
+Teacher v2 Ensemble Median (Handover Sec 7.1),"11586.6 [7233.7, 21136.2]","0.5229 [0.3265, 0.9539]","0.3147 [0.1658, 0.3763]","40.80% [20.65%, 47.56%]","60.19% [46.10%, 89.63%]","20 fixed seeds (100+17*i), physics+embers, runtime ~4.0s/seed"

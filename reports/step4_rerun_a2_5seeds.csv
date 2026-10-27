@@ -1,0 +1,11 @@
+teacher_seed,mode,area_ha,combined_misses,trapped_count,av_routed_mean,av_routed_median,av_routed_p90
+389,assimilated (standard A2),2437.6,157/200 (78.5%),2/200 (1.0%),3.278,2.0,5.0
+389,pure physics (unassimilated),2437.6,164/200 (82.0%),1/200 (0.5%),3.769,2.0,9.0
+117,assimilated (standard A2),9443.5,157/200 (78.5%),2/200 (1.0%),3.278,2.0,5.0
+117,pure physics (unassimilated),9443.5,164/200 (82.0%),1/200 (0.5%),3.769,2.0,9.0
+304,assimilated (standard A2),12223.4,157/200 (78.5%),2/200 (1.0%),3.278,2.0,5.0
+304,pure physics (unassimilated),12223.4,164/200 (82.0%),1/200 (0.5%),3.769,2.0,9.0
+100,assimilated (standard A2),17579.5,157/200 (78.5%),2/200 (1.0%),3.278,2.0,5.0
+100,pure physics (unassimilated),17579.5,164/200 (82.0%),1/200 (0.5%),3.769,2.0,9.0
+236,assimilated (standard A2),27327.2,157/200 (78.5%),2/200 (1.0%),3.278,2.0,5.0
+236,pure physics (unassimilated),27327.2,164/200 (82.0%),1/200 (0.5%),3.769,2.0,9.0

@@ -1,0 +1,5 @@
+method,pred_margin_median,pred_margin_p10,pred_negative_count,truth_margin_median,truth_margin_p10,truth_negative_count
+static,-inf,-inf,0/200 (0.0%),-inf,-inf,0/200 (0.0%)
+agent_a2,-inf,-inf,3/200 (1.5%),-inf,-inf,2/200 (1.0%)
+agent_a3,81.7 min,52.0 min,2/200 (1.0%),82.5 min,52.3 min,1/200 (0.5%)
+agent_b_on_a3,48.8 min,3.5 min,19/200 (9.5%),53.6 min,3.6 min,16/200 (8.0%)

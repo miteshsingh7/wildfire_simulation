@@ -351,18 +351,111 @@ class ObservationInflatedProvider(FieldProvider):
         return ds
 
 
-class SurrogateFieldProvider(FieldProvider):
-    """Provider C: Stub for ML surrogate model to be trained in future phases."""
+class DynamicTeacherV2Provider(FieldProvider):
+    """Teacher v2 provider initialized directly from simulated arrival raster.
 
-    def __init__(self, weights_path: str | Path | None = None) -> None:
-        self.weights_path = Path(weights_path) if weights_path else None
+    Supports both unassimilated forward physics (assimilate=False) and causal
+    observation assimilation (assimilate=True).
+    """
+
+    def __init__(
+        self,
+        arr_min: np.ndarray,
+        gx: np.ndarray,
+        gy: np.ndarray,
+        patch_radius_m: float = 120.0,
+        assimilate: bool = True,
+    ) -> None:
+        self.arr_min = arr_min
+        self.gx = gx
+        self.gy = gy
+        self.patch_radius_m = patch_radius_m
+        self.assimilate = assimilate
+
+        arr_clean = np.where(np.isfinite(arr_min) & (arr_min >= 0.0), arr_min, np.inf)
+        self._cached_base_field = xr.Dataset(
+            data_vars={
+                "arrival_q10": (["y", "x"], arr_clean),
+                "arrival_q50": (["y", "x"], arr_clean),
+                "arrival_q90": (["y", "x"], arr_clean),
+            },
+            coords={"x": gx, "y": gy},
+            attrs={"provider": "teacher_v2_dynamic", "crs": "EPSG:32610", "ignition_time": "2018-11-08T14:33:00Z"},
+        )
+        validate_arrival_field(self._cached_base_field)
+
+    def get_field(self, current_step_min: float, visible_observations: gpd.GeoDataFrame | None = None) -> xr.Dataset:
+        if not self.assimilate or visible_observations is None or len(visible_observations) == 0:
+            return self._cached_base_field
+
+        gx, gy = self.gx, self.gy
+        ny, nx = len(gy), len(gx)
+        dx = float(gx[1] - gx[0])
+        dy = float(gy[0] - gy[1])
+
+        base_arr = self._cached_base_field["arrival_q50"].values.copy()
+        assim_arr = base_arr.copy()
+
+        for _, obs in visible_observations.iterrows():
+            t_obs = float(obs.get("elapsed_minutes_adj", obs.get("elapsed_minutes", 0.0)))
+            if t_obs > current_step_min:
+                continue
+            geom = obs.geometry
+            if geom is None:
+                continue
+            ox = float(geom.x) if hasattr(geom, "x") else float(geom.centroid.x)
+            oy = float(geom.y) if hasattr(geom, "y") else float(geom.centroid.y)
+
+            c_min = max(0, int((ox - self.patch_radius_m - gx[0]) / dx))
+            c_max = min(nx, int((ox + self.patch_radius_m - gx[0]) / dx) + 1)
+            r_min = max(0, int((gy[0] - (oy + self.patch_radius_m)) / dy))
+            r_max = min(ny, int((gy[0] - (oy - self.patch_radius_m)) / dy) + 1)
+
+            if c_min >= c_max or r_min >= r_max:
+                continue
+
+            sub = assim_arr[r_min:r_max, c_min:c_max]
+            sub[:] = np.minimum(sub, t_obs)
+
+        ds = xr.Dataset(
+            data_vars={"arrival_q10": (["y", "x"], assim_arr), "arrival_q50": (["y", "x"], assim_arr), "arrival_q90": (["y", "x"], assim_arr)},
+            coords={"x": gx, "y": gy},
+            attrs={"provider": "teacher_v2_dynamic_assim", "crs": "EPSG:32610", "ignition_time": "2018-11-08T14:33:00Z"},
+        )
+        validate_arrival_field(ds)
+        return ds
+
+
+class SurrogateFieldProvider(FieldProvider):
+    """Provider C / A3: Surrogate neural network arrival field provider.
+
+    Supports precomputed arrival fields and step-wise 30-min updates.
+    """
+
+    def __init__(
+        self,
+        arrival_field: ArrivalField | None = None,
+        update_fields: dict[float, ArrivalField] | None = None,
+    ) -> None:
+        self.arrival_field = arrival_field
+        self.update_fields = update_fields or {}
+
+    def set_field(self, arrival_field: ArrivalField) -> None:
+        """Update current arrival field."""
+        self.arrival_field = arrival_field
 
     def get_field(
         self,
         current_step_min: float,
         visible_observations: gpd.GeoDataFrame | None = None,
     ) -> ArrivalField:
-        raise NotImplementedError(
-            "SurrogateFieldProvider stub: Surrogate model weights not trained in Phase 6A. "
-            "Use Provider A (TeacherFieldProvider) or Provider B (ObservationInflatedProvider)."
-        )
+        if self.update_fields:
+            valid_times = [t for t in self.update_fields.keys() if t <= current_step_min]
+            if valid_times:
+                latest_t = max(valid_times)
+                return self.update_fields[latest_t]
+
+        if self.arrival_field is not None:
+            return self.arrival_field
+
+        raise NotImplementedError("SurrogateFieldProvider stub: Surrogate model weights not trained in Phase 6A.")
