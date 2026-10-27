@@ -13,6 +13,7 @@ Contract:
 - Compatible with AMP (torch.amp.autocast).
 """
 
+import math
 from typing import NamedTuple
 
 import torch
@@ -161,6 +162,18 @@ class WindConditionedUNet(nn.Module):
             nn.SiLU(),
             nn.Conv2d(c1, 1, kernel_size=1),
         )
+
+    def init_burn_prob_bias(self, mean_burn_prob: float) -> float:
+        """Initialise the bias of the burn-probability head to logit(clip(mean, 1e-4, 0.5)).
+
+        Computed from training shards only.
+        Returns the initialised scalar bias value.
+        """
+        clipped = min(max(float(mean_burn_prob), 1e-4), 0.5)
+        bias_val = float(math.log(clipped / (1.0 - clipped)))
+        with torch.no_grad():
+            nn.init.constant_(self.burn_logit_head[2].bias, bias_val)
+        return bias_val
 
     def forward(self, spatial_features: torch.Tensor, wind_series: torch.Tensor) -> ModelOutput:
         """Forward pass.

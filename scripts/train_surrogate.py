@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import time
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +36,9 @@ from wf052.surrogate.dataset import (
     collate_surrogate_batch,
 )
 from wf052.surrogate.evaluate import (
+    aggregate_per_bin_and_fire_metrics,
     aggregate_per_bin_metrics,
+    check_evaluation_guards,
     evaluate_baseline_on_dataset,
     evaluate_model_on_dataset,
     fit_baseline_b0,
@@ -139,7 +142,7 @@ def main() -> None:
     amp = int(os.environ.get("AMP", 0)) == 1
     ckpt_dir = Path(os.environ.get("CHECKPOINT_DIR", "checkpoints"))
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    rep_dir = Path("reports")
+    rep_dir = Path(os.environ.get("REPORTS_DIR", "reports"))
     rep_dir.mkdir(parents=True, exist_ok=True)
 
     set_seed(seed)
@@ -200,6 +203,23 @@ def main() -> None:
     print(ct)
 
     print(f"\nSplit Sizes: Train={len(train_indices)}, Val={len(val_indices)}, Test={len(test_indices)}")
+
+    # Phase 3C Step 1: Base-Rate Initialization from TRAIN shards only
+    total_bp_sum = 0.0
+    total_cells = 0
+    for idx in train_indices:
+        bp = ds[idx]["burn_prob"].numpy()
+        total_bp_sum += float(np.sum(bp))
+        total_cells += bp.size
+    mean_train_bp = float(total_bp_sum / max(1, total_cells))
+    init_bias = model.init_burn_prob_bias(mean_train_bp)
+    param_count_after = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    assert param_count_after == 4094852, f"Expected 4,094,852 params, got {param_count_after}"
+
+    print(f"\n--- Phase 3C Step 1: Base-Rate Head Initialization ---")
+    print(f"  Mean burn_prob over TRAIN shards: {mean_train_bp:.6f}")
+    print(f"  Head bias initialized to:         {init_bias:+.6f}")
+    print(f"  Parameter count (must be 4,094,852): {param_count_after:,}")
 
     # Dataloaders
     train_subset = Subset(ds, train_indices)
@@ -358,6 +378,9 @@ def main() -> None:
         df_val_samples = evaluate_model_on_dataset(model, ds, target_indices=val_indices, device=device)
         df_val_bins = aggregate_per_bin_metrics(df_val_samples)
 
+        # Check evaluation guards (Phase 3C Step 4)
+        check_evaluation_guards(df_val_samples)
+
         ep_duration = time.perf_counter() - t_ep_start
         print(
             f"Epoch {epoch:2d}/{epochs} ({ep_duration:.1f}s) | "
@@ -427,10 +450,20 @@ def main() -> None:
         mean_step_sec = float(np.mean(step_times))
         p95_step_sec = float(np.percentile(step_times, 95))
         gpu_mem_mb = get_gpu_memory_mb(device)
-        print(f"\nPerformance Benchmark (first {len(step_times)} steps):")
+        step_lbl = f"all {len(step_times)} steps" if len(step_times) < 30 else f"first {len(step_times)} steps"
+        print(f"\nPerformance Benchmark ({step_lbl}):")
         print(f"  Time per iteration (mean): {mean_step_sec * 1000.0:.2f} ms ({mean_step_sec:.4f} s)")
         print(f"  Time per iteration (p95):  {p95_step_sec * 1000.0:.2f} ms ({p95_step_sec:.4f} s)")
-        print(f"  Peak GPU Memory:           {gpu_mem_mb:.1f} MB")
+        if device.type == "cuda":
+            peak_cuda_mb = float(torch.cuda.max_memory_allocated() / (1024 * 1024))
+            print(f"  CUDA Memory (max_memory_allocated): {peak_cuda_mb:.2f} MB")
+        elif device.type == "mps":
+            mps_cur_mb = float(torch.mps.current_allocated_memory() / (1024 * 1024)) if hasattr(torch.mps, "current_allocated_memory") else 0.0
+            mps_drv_mb = float(torch.mps.driver_allocated_memory() / (1024 * 1024)) if hasattr(torch.mps, "driver_allocated_memory") else 0.0
+            print(f"  MPS Current Allocated Memory:       {mps_cur_mb:.2f} MB")
+            print(f"  MPS Driver Allocated Memory:        {mps_drv_mb:.2f} MB")
+        else:
+            print(f"  Peak GPU Memory:           {gpu_mem_mb:.1f} MB")
 
     # =========================================================================
     # POST-TRAINING TEST EVALUATION (Held-out Test Fires: caldor, tamarack)
@@ -446,27 +479,29 @@ def main() -> None:
 
     # 1. Evaluate surrogate model on test fires
     df_surrogate_test = evaluate_model_on_dataset(model, ds, target_indices=test_indices, device=device)
-    agg_surrogate = aggregate_per_bin_metrics(df_surrogate_test)
-    agg_surrogate["model"] = "Surrogate (UNet)"
-    agg_surrogate["split"] = "test"
+    agg_surrogate = aggregate_per_bin_and_fire_metrics(df_surrogate_test, fires=test_fires, model_name="Surrogate (UNet)")
 
     # 2. Evaluate Baseline B0 on test fires
     df_b0_test = evaluate_baseline_on_dataset(b0, ds, test_indices, baseline_name="B0")
-    agg_b0 = aggregate_per_bin_metrics(df_b0_test)
-    agg_b0["model"] = "Baseline B0"
-    agg_b0["split"] = "test"
+    agg_b0 = aggregate_per_bin_and_fire_metrics(df_b0_test, fires=test_fires, model_name="Baseline B0")
 
     # 3. Evaluate Baseline B1 on test fires
     df_b1_test = evaluate_baseline_on_dataset(b1, ds, test_indices, baseline_name="B1")
-    agg_b1 = aggregate_per_bin_metrics(df_b1_test)
-    agg_b1["model"] = "Baseline B1"
-    agg_b1["split"] = "test"
+    agg_b1 = aggregate_per_bin_and_fire_metrics(df_b1_test, fires=test_fires, model_name="Baseline B1")
 
     df_test_final = pd.concat([agg_surrogate, agg_b0, agg_b1], ignore_index=True)
     test_eval_csv = rep_dir / "test_eval.csv"
     df_test_final.to_csv(test_eval_csv, index=False)
     print(f"\n--- Test Evaluation Summary (Saved to {test_eval_csv}) ---")
-    print(df_test_final[["model", "bin", "bin_name", "n", "flag", "brier", "iou", "mae_q50", "false_unburned_share"]].to_string(index=False))
+    cols_to_show = ["model", "fire", "bin", "bin_name", "n", "flag", "brier", "iou", "mae_q10", "mae_q50", "mae_q90", "false_unburned_share"]
+    print(df_test_final[cols_to_show].to_string(index=False))
+
+    # Print SHA-256 of all checkpoints
+    print("\n--- Checkpoint SHA-256 Checksums ---")
+    for cp in [best_pt_path, last_pt_path]:
+        if cp.exists():
+            h = hashlib.sha256(cp.read_bytes()).hexdigest()
+            print(f"  {cp}: {h}")
 
 
 if __name__ == "__main__":

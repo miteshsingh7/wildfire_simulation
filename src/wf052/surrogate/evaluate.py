@@ -131,6 +131,15 @@ def compute_sample_metrics(
         v2 = pred_quantiles[1] > pred_quantiles[2]
         order_viol_rate = float(np.mean(v1 | v2))
 
+    # 5. Evaluation guards (Phase 3C Step 4)
+    pred_bp_std = float(np.std(pred_burn_prob))
+    pred_q50_std = float(np.std(pred_quantiles[1]))
+    pred_area_p05 = float(np.mean(pred_burn_prob >= 0.5))
+    pred_area_p01 = float(np.mean(pred_burn_prob >= 0.1))
+    target_area_mean = float(np.mean(target_burn_prob))
+    target_area_p05 = float(np.mean(target_burn_prob >= 0.5))
+    target_area_p01 = float(np.mean(target_burn_prob >= 0.1))
+
     return {
         "brier": brier,
         "iou": iou,
@@ -139,6 +148,13 @@ def compute_sample_metrics(
         "mae_q90": mae_q90,
         "false_unburned_share": share_unburned_q50,
         "ordering_violation_rate": order_viol_rate,
+        "pred_bp_std": pred_bp_std,
+        "pred_q50_std": pred_q50_std,
+        "pred_area_p05": pred_area_p05,
+        "pred_area_p01": pred_area_p01,
+        "target_area_mean": target_area_mean,
+        "target_area_p05": target_area_p05,
+        "target_area_p01": target_area_p01,
     }
 
 
@@ -337,6 +353,13 @@ def evaluate_model_on_dataset(
                 "mae_q90": m["mae_q90"],
                 "false_unburned_share": m["false_unburned_share"],
                 "ordering_violation_rate": m["ordering_violation_rate"],
+                "pred_bp_std": m["pred_bp_std"],
+                "pred_q50_std": m["pred_q50_std"],
+                "pred_area_p05": m["pred_area_p05"],
+                "pred_area_p01": m["pred_area_p01"],
+                "target_area_mean": m["target_area_mean"],
+                "target_area_p05": m["target_area_p05"],
+                "target_area_p01": m["target_area_p01"],
             })
 
     return pd.DataFrame(records)
@@ -395,9 +418,103 @@ def evaluate_baseline_on_dataset(
             "mae_q90": m["mae_q90"],
             "false_unburned_share": m["false_unburned_share"],
             "ordering_violation_rate": m["ordering_violation_rate"],
+            "pred_bp_std": m["pred_bp_std"],
+            "pred_q50_std": m["pred_q50_std"],
+            "pred_area_p05": m["pred_area_p05"],
+            "pred_area_p01": m["pred_area_p01"],
+            "target_area_mean": m["target_area_mean"],
+            "target_area_p05": m["target_area_p05"],
+            "target_area_p01": m["target_area_p01"],
         })
 
     return pd.DataFrame(records)
+
+
+def check_evaluation_guards(df_val_samples: pd.DataFrame) -> list[str]:
+    """Check evaluation guards on validation samples (Phase 3C Step 4).
+
+    Prints a loud WARNING if:
+    1. Mean std of predicted burn_prob across val samples is below 1e-3.
+    2. Mean predicted p>=0.1 area exceeds 5x target area.
+
+    Returns list of warning strings.
+    """
+    warnings: list[str] = []
+    if df_val_samples.empty:
+        return warnings
+
+    mean_bp_std = float(df_val_samples["pred_bp_std"].mean())
+    if mean_bp_std < 1e-3:
+        warnings.append(
+            f"GUARD FAILURE: Mean std of predicted burn_prob across val samples is {mean_bp_std:.6e} (< 1e-3)! "
+            "Model predictions are essentially flat / uninformative!"
+        )
+
+    mean_pred_p01 = float(df_val_samples["pred_area_p01"].mean())
+    mean_target_area = float(df_val_samples["target_area_mean"].mean())
+    if mean_pred_p01 > 5.0 * max(mean_target_area, 1e-5):
+        ratio = mean_pred_p01 / max(mean_target_area, 1e-5)
+        warnings.append(
+            f"GUARD FAILURE: Predicted p>=0.1 area ({mean_pred_p01:.4f}) exceeds 5x target area ({mean_target_area:.4f})! "
+            f"Ratio: {ratio:.2f}x > 5.0x"
+        )
+
+    if warnings:
+        print("\n" + "!" * 78)
+        print("!!! LOUD EVALUATION GUARD WARNING !!!")
+        for w in warnings:
+            print(f"!!! WARNING: {w}")
+        print("!" * 78 + "\n")
+
+    return warnings
+
+
+def aggregate_per_bin_and_fire_metrics(
+    df_records: pd.DataFrame,
+    fires: Sequence[str] | None = None,
+    model_name: str = "Surrogate (UNet)",
+) -> pd.DataFrame:
+    """Aggregate records into table with breakdown per bin AND per fire, with n and LOW-N flags."""
+    rows = []
+    if "model" not in df_records.columns:
+        df_records = df_records.copy()
+        df_records["model"] = model_name
+
+    m_name = df_records["model"].iloc[0] if not df_records.empty else model_name
+
+    available_fires = list(fires) if fires is not None else sorted(df_records["fire"].unique())
+    # Fire breakdown: each individual fire plus 'ALL'
+    fire_subsets = [(f, df_records[df_records["fire"] == f]) for f in available_fires]
+    fire_subsets.append(("ALL", df_records))
+
+    for f_label, f_df in fire_subsets:
+        all_bins = range(len(BIN_NAMES))
+        for b in all_bins:
+            sub = f_df[f_df["bin_kmean"] == b]
+            n = len(sub)
+            low_n_flag = "LOW-N" if n < 5 else "OK"
+            b_name = BIN_NAMES[b]
+
+            rows.append({
+                "model": m_name,
+                "fire": f_label,
+                "bin": b,
+                "bin_name": b_name,
+                "n": n,
+                "flag": low_n_flag,
+                "brier": round(float(sub["brier"].mean()), 5) if n > 0 else float("nan"),
+                "iou": round(float(sub["iou"].dropna().mean()), 4) if (n > 0 and not sub["iou"].dropna().empty) else float("nan"),
+                "mae_q10": round(float(sub["mae_q10"].dropna().mean()), 2) if (n > 0 and not sub["mae_q10"].dropna().empty) else float("nan"),
+                "mae_q50": round(float(sub["mae_q50"].dropna().mean()), 2) if (n > 0 and not sub["mae_q50"].dropna().empty) else float("nan"),
+                "mae_q90": round(float(sub["mae_q90"].dropna().mean()), 2) if (n > 0 and not sub["mae_q90"].dropna().empty) else float("nan"),
+                "false_unburned_share": round(float(sub["false_unburned_share"].dropna().mean()), 4) if (n > 0 and not sub["false_unburned_share"].dropna().empty) else float("nan"),
+                "ordering_violation_rate": round(float(sub["ordering_violation_rate"].mean()), 5) if n > 0 else float("nan"),
+                "pred_bp_std": round(float(sub["pred_bp_std"].mean()), 5) if n > 0 else float("nan"),
+                "pred_area_p01": round(float(sub["pred_area_p01"].mean()), 4) if n > 0 else float("nan"),
+                "target_area_mean": round(float(sub["target_area_mean"].mean()), 4) if n > 0 else float("nan"),
+            })
+
+    return pd.DataFrame(rows)
 
 
 def aggregate_per_bin_metrics(df_records: pd.DataFrame, group_col: str = "bin_kmean") -> pd.DataFrame:
