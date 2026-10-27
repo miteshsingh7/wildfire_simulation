@@ -1,0 +1,6 @@
+sample_idx,fire_id,seed_0,seed_list_0,array_equal,bytes_equal,bf_computed,bf_meta,bf_matches
+0,bobcat,42017,42017,True,True,0.002,0.0649,False
+1,caldor,42034,42034,True,True,0.0008,0.0341,False
+2,creek,42051,42051,True,True,0.0073,0.0087,False
+3,glass,42068,42068,True,True,0.0001,0.0002,True
+4,kincade,42085,42085,True,True,0.0,0.007,False

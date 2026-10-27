@@ -1,0 +1,30 @@
+{
+  "elapsed_total_sec": 1201.38,
+  "total_candidates_drawn": 1476,
+  "total_accepted": 59,
+  "k1_sims": {
+    "count": 1195,
+    "mean_sec": 0.8856,
+    "p95_sec": 1.3532,
+    "total_sec": 1058.3
+  },
+  "extra_seed_sims": {
+    "count": 177,
+    "mean_sec": 0.6802,
+    "p95_sec": 1.0064,
+    "total_sec": 120.4
+  },
+  "glass_diagnosis": {
+    "total_candidates": 1301,
+    "fuel_grp0_rejections": 279,
+    "share_grp0_rejections": 0.2145,
+    "k1_sims_run": 1022,
+    "k1_bin_counts": {
+      "bin0": 243,
+      "bin1": 325,
+      "bin2": 250,
+      "bin3": 204,
+      "bin4": 0
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "batch_size": 4,
+  "device": "mps",
+  "total_loss": 0.601171,
+  "pinball_loss": 0.17367,
+  "ordering_loss": 0.051463,
+  "bce_loss": 0.752073,
+  "loss_q10": 0.300811,
+  "loss_q50": 0.177078,
+  "loss_q90": 0.043122
+}

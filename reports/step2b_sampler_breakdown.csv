@@ -1,0 +1,9 @@
+fire,candidates_drawn,fuel_grp0_rejections,k1_sims_run,bin0_count,bin1_count,bin2_count,bin3_count,bin4_count,accepted,wall_sec_k1_sims,wall_sec_extra_seeds,wall_sec_overhead,wall_sec_total
+bobcat,17,0,17,6,2,6,2,1,9,12.52,13.99,0.29,26.8
+caldor,21,0,21,4,6,6,4,1,9,15.57,19.37,0.3,35.24
+creek,82,0,82,15,25,34,7,1,9,68.49,19.15,1.26,88.91
+glass,1301,279,1022,243,325,250,204,0,8,921.9,15.95,19.34,957.19
+kincade,20,2,18,9,5,2,2,0,8,14.49,18.35,0.26,33.09
+tamarack,19,0,19,1,10,2,5,1,8,13.61,15.66,0.28,29.55
+zogg,16,0,16,1,5,3,6,1,8,11.72,17.93,0.25,29.91
+Total,1476,281,1195,279,378,303,230,5,59,1058.3,120.4,21.98,1200.69

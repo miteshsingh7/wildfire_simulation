@@ -1,0 +1,6 @@
+bin_kmean,sample_count,mean_wind_speed_ms,max_wind_speed_ms,counts_per_fire
+0,3,5.906,10.884,"bobcat:1, caldor:1, kincade:1"
+1,17,8.52,19.241,"caldor:2, creek:4, glass:3, kincade:3, tamarack:3, zogg:2"
+2,21,5.057,18.52,"bobcat:5, caldor:3, creek:2, glass:3, kincade:3, tamarack:2, zogg:3"
+3,15,2.977,17.885,"bobcat:2, caldor:2, creek:3, glass:2, kincade:1, tamarack:3, zogg:2"
+4,3,1.395,3.108,"bobcat:1, caldor:1, zogg:1"

@@ -1,0 +1,4 @@
+wind_speed_ms,fuel_code,terrain,downwind_p_ignite,crosswind_p_ignite,upwind_p_ignite,ratio_downwind_to_crosswind
+2.0,"TL5 (185, p_veg=0.30)",Flat (slope=0),0.344726,0.260164,0.194749,1.33
+8.0,"TL5 (185, p_veg=0.30)",Flat (slope=0),0.438895,0.140878,0.04269,3.12
+20.0,"TL5 (185, p_veg=0.30)",Flat (slope=0),0.668486,0.040206,0.002003,16.63

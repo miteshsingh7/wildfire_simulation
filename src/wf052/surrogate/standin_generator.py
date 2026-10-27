@@ -788,6 +788,9 @@ class RejectionSamplingReport:
     fire_bin_counts: dict[str, list[int]] | None = None
     fire_bin_attempts: dict[str, list[int]] | None = None
     fire_group0_rejections: dict[str, int] | None = None
+    k1_sim_times: list[float] | None = None
+    extra_seed_times: list[float] | None = None
+    attempt_records: list[dict[str, Any]] | None = None
 
     def to_markdown(self) -> str:
         """Format report as a clean markdown table."""
@@ -1249,6 +1252,7 @@ def generate_stratified_samples_rejection(
     progress_interval: int = 5,
     mode: str = "smoke",
     scenarios_per_fire: int | None = None,
+    attempt_log_path: str | Path | None = None,
 ) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
     """Generate training samples using round-robin stratified rejection sampling.
 
@@ -1403,6 +1407,9 @@ def generate_stratified_samples_rejection(
     t0_rejection = time.perf_counter()
     attempt_durations: list[float] = []
     last_progress_count = 0
+    k1_sim_times: list[float] = []
+    extra_seed_times: list[float] = []
+    attempt_records: list[dict[str, Any]] = []
 
     def fire_is_open(f: str) -> bool:
         for b in range(num_bins):
@@ -1482,6 +1489,21 @@ def generate_stratified_samples_rejection(
             group0_rejections_by_fire[active_fire] += 1
             att_dur = time.perf_counter() - t_att0
             attempt_durations.append(att_dur)
+            attempt_records.append({
+                "attempt": attempt,
+                "fire": active_fire,
+                "ign_r": ign_r,
+                "ign_c": ign_c,
+                "fbfm40": int(f_info["fbfm"][ign_r, ign_c]),
+                "fuel_grp": fuel_grp_at_ign,
+                "is_fuel_0": True,
+                "k1_sim_sec": 0.0,
+                "bf_k1": float("nan"),
+                "bin_k1": -1,
+                "accepted": False,
+                "extra_seeds_sim_sec": 0.0,
+                "overhead_sec": round(att_dur, 6),
+            })
             continue
 
         # Setup ignition mask
@@ -1491,6 +1513,7 @@ def generate_stratified_samples_rejection(
         ign_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
 
         seed_0 = int(candidate_seed % 2_147_483_647)
+        dur_k1 = 0.0
 
         # STEP 3 RULE: Run K=1 prescreen with seed_0
         if source_mode in ("teacher_v2_ensemble", "teacher_v2_embers"):
@@ -1502,6 +1525,7 @@ def generate_stratified_samples_rejection(
                 hourly_wind_uv=hourly_wind_perturbed,
                 device=device,
             )
+            t_k1_0 = time.perf_counter()
             sim_out_0 = simulate_teacher_with_embers_60m(
                 ds=ds_tile,
                 params=t_params,
@@ -1512,11 +1536,14 @@ def generate_stratified_samples_rejection(
                 seed=seed_0,
                 init_burned_mask=ign_mask.astype(bool),
             )
+            dur_k1 = time.perf_counter() - t_k1_0
+            k1_sim_times.append(dur_k1)
             raw_arr_0 = sim_out_0["arrival_time_min"]
             clean_arr_0 = np.where(np.isnan(raw_arr_0) | (raw_arr_0 > horizon_min), np.inf, raw_arr_0).astype(np.float32)
             c50_k1 = (np.isinf(clean_arr_0) | np.isnan(clean_arr_0) | (clean_arr_0 > horizon_min)).astype(np.float32)
             bf_k1 = float(np.mean(c50_k1 < 0.5))
         elif source_mode == "teacher_v1_cellular":
+            t_k1_0 = time.perf_counter()
             arr_time_0, c_mask_0 = simulate_cellular_standin_arrival(
                 fuel_group=f_info["fuel_grp"],
                 hourly_wind_uv=hourly_wind_perturbed,
@@ -1526,10 +1553,13 @@ def generate_stratified_samples_rejection(
                 horizon_min=horizon_min,
                 speed_multiplier=spd_mult,
             )
+            dur_k1 = time.perf_counter() - t_k1_0
+            k1_sim_times.append(dur_k1)
             clean_arr_0 = np.where(c_mask_0 >= 0.5, np.inf, arr_time_0).astype(np.float32)
             bf_k1 = float(np.mean(c_mask_0 < 0.5))
         else:
             lb_jitter = float(rng.uniform(-0.3, 0.3))
+            t_k1_0 = time.perf_counter()
             arr_time_0, c_mask_0 = generate_analytic_arrival_surface(
                 fuel_group=f_info["fuel_grp"],
                 hourly_wind_uv=hourly_wind_perturbed,
@@ -1540,6 +1570,8 @@ def generate_stratified_samples_rejection(
                 speed_multiplier=spd_mult,
                 length_to_breadth=2.5 + lb_jitter,
             )
+            dur_k1 = time.perf_counter() - t_k1_0
+            k1_sim_times.append(dur_k1)
             clean_arr_0 = np.where(c_mask_0 >= 0.5, np.inf, arr_time_0).astype(np.float32)
             bf_k1 = float(np.mean(c_mask_0 < 0.5))
 
@@ -1554,6 +1586,8 @@ def generate_stratified_samples_rejection(
             and (max_attempts_per_bin is None or attempts_by_fire_bin[active_fire][bin_k1] <= max_attempts_per_bin)
         )
 
+        dur_extra_seeds: list[float] = []
+
         if is_open:
             # STEP 3 RULE: reuse seed_0 as ensemble member 0 bit for bit!
             arrival_runs = [clean_arr_0]
@@ -1563,6 +1597,7 @@ def generate_stratified_samples_rejection(
                 for k in range(1, k_ensemble):
                     seed_k = int((candidate_seed + k * 10007) % 2_147_483_647)
                     seed_list.append(seed_k)
+                    t_ext_0 = time.perf_counter()
                     sim_out_k = simulate_teacher_with_embers_60m(
                         ds=ds_tile,
                         params=t_params,
@@ -1573,6 +1608,9 @@ def generate_stratified_samples_rejection(
                         seed=seed_k,
                         init_burned_mask=ign_mask.astype(bool),
                     )
+                    dur_ext = time.perf_counter() - t_ext_0
+                    extra_seed_times.append(dur_ext)
+                    dur_extra_seeds.append(dur_ext)
                     raw_arr_k = sim_out_k["arrival_time_min"]
                     clean_arr_k = np.where(
                         np.isnan(raw_arr_k) | (raw_arr_k > horizon_min), np.inf, raw_arr_k
@@ -1649,6 +1687,22 @@ def generate_stratified_samples_rejection(
 
         att_dur = time.perf_counter() - t_att0
         attempt_durations.append(att_dur)
+        overhead_sec = att_dur - dur_k1 - sum(dur_extra_seeds)
+        attempt_records.append({
+            "attempt": attempt,
+            "fire": active_fire,
+            "ign_r": ign_r,
+            "ign_c": ign_c,
+            "fbfm40": int(f_info["fbfm"][ign_r, ign_c]),
+            "fuel_grp": fuel_grp_at_ign,
+            "is_fuel_0": False,
+            "k1_sim_sec": round(dur_k1, 6),
+            "bf_k1": round(bf_k1, 6),
+            "bin_k1": bin_k1,
+            "accepted": bool(is_open),
+            "extra_seeds_sim_sec": round(sum(dur_extra_seeds), 6),
+            "overhead_sec": round(max(0.0, overhead_sec), 6),
+        })
 
         if progress_interval > 0 and len(accepted_samples) >= last_progress_count + progress_interval:
             last_progress_count = (len(accepted_samples) // progress_interval) * progress_interval
@@ -1696,6 +1750,12 @@ def generate_stratified_samples_rejection(
     )
     print("\n--- Per Fire x Bin Table (Target, Accepted, Attempts) ---\n" + tbl_str + "\n", flush=True)
 
+    if attempt_log_path is not None:
+        p_log = Path(attempt_log_path)
+        p_log.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(attempt_records).to_csv(p_log, index=False)
+        logger.info("Saved %d attempt records to %s", len(attempt_records), attempt_log_path)
+
     report = RejectionSamplingReport(
         stats=stats,
         total_generated=attempt,
@@ -1707,6 +1767,9 @@ def generate_stratified_samples_rejection(
         fire_bin_counts=accepted_by_fire_bin,
         fire_bin_attempts=attempts_by_fire_bin,
         fire_group0_rejections=group0_rejections_by_fire,
+        k1_sim_times=k1_sim_times,
+        extra_seed_times=extra_seed_times,
+        attempt_records=attempt_records,
     )
 
     return accepted_samples, report

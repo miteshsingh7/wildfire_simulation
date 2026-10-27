@@ -1,0 +1,16 @@
+fire,target_direction,u_ms,v_ms,ign_r,ign_c,mean_delta_row,mean_delta_col,mean_burned_cells,empirical_compass
+caldor,East,8.0,0.0,128,128,4.54,55.08,1505.0,SouthEast
+caldor,North,0.0,8.0,128,128,-43.38,2.71,1149.4,NorthEast
+caldor,West,-8.0,0.0,128,128,-1.58,-40.41,1144.5,NorthWest
+caldor,South,0.0,-8.0,128,128,34.12,2.03,790.2,SouthEast
+caldor,Northeast,5.66,5.66,128,128,-42.02,48.86,2605.2,NorthEast
+kincade,East,8.0,0.0,128,128,-0.82,2.88,23.0,East
+kincade,North,0.0,8.0,128,128,-5.15,-0.21,48.2,North
+kincade,West,-8.0,0.0,128,128,-1.31,-5.4,59.4,NorthWest
+kincade,South,0.0,-8.0,128,128,7.16,0.06,63.8,South
+kincade,Northeast,5.66,5.66,128,128,-9.42,8.29,118.6,NorthEast
+creek,East,8.0,0.0,128,128,0.42,-0.12,17.1,None
+creek,North,0.0,8.0,128,128,-12.73,-6.07,403.2,NorthWest
+creek,West,-8.0,0.0,128,128,-1.63,-45.27,2364.4,NorthWest
+creek,South,0.0,-8.0,128,128,12.51,-5.5,206.0,SouthWest
+creek,Northeast,5.66,5.66,128,128,-0.41,-0.51,8.0,None
