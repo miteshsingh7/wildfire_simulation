@@ -1,0 +1,8 @@
+agent,no_hazard_on_route_count,origins_with_hazard_count,truth_margin_median,truth_margin_p10_finite,negative_margin_count,trapped_count,pos_inf_count,neg_inf_count,pred_margin_median,pred_margin_p10
+A0 static,7,193,-31.5 min,-60.6 min,168/193,0/200,7,0,NOT APPLICABLE,NOT APPLICABLE
+A1 reactive,21,154,-29.1 min,-60.7 min,137/154,25/200,21,25,+inf,+inf
+A (teacher_v1),8,191,-31.5 min,-61.0 min,163/191,1/200,8,1,+inf,+inf
+A2-assim,27,171,-37.0 min,-61.3 min,155/171,2/200,27,2,244.9 min,199.2 min
+A2-pure,8,191,-31.5 min,-61.0 min,163/191,1/200,8,1,196.2 min,175.2 min
+B on A2-assim,49,145,-17.9 min,-66.5 min,135/145,6/200,49,6,29.8 min,3.5 min
+B on A2-pure,46,148,-18.7 min,-66.5 min,138/148,6/200,46,6,29.8 min,3.5 min

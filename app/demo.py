@@ -478,9 +478,16 @@ with tab_origin:
                 else:
                     st.success("✅ SAFE CLEARANCE")
 
+                if np.isfinite(margin):
+                    margin_display = f"{margin:.1f} min"
+                elif np.isposinf(margin) or margin > 0:
+                    margin_display = "no hazard on route"
+                else:
+                    margin_display = "-inf"
+
                 st.metric(
                     "Safety Margin",
-                    f"{margin:.1f} min" if np.isfinite(margin) else ("+inf" if margin > 0 else "-inf"),
+                    margin_display,
                 )
 
 with tab_zones:

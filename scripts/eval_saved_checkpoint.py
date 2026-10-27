@@ -39,7 +39,9 @@ def main() -> None:
     # Load dataset
     ds = CompactSurrogateDataset(shard_paths=shards_dir, fires_base_dir=tiles_base)
 
-    train_fires = ["bobcat", "creek", "glass", "kincade"]
+    # Canonical train, val, and test fire splits from configs/scenarios.yaml and train_surrogate.py
+    train_fires = ["kincade", "glass", "zogg", "creek"]
+    val_fires = ["bobcat"]
     test_fires = ["caldor", "tamarack"]
 
     test_indices = [i for i, f in enumerate(ds.fire_ids) if f in test_fires]

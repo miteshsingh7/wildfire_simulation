@@ -1,0 +1,10 @@
+component,granularity,latency_ms,n_trials,device,notes
+Router + Validator,Per 30-min replan event (all 200 origins),2115.74,13 events,CPU (Apple M1),10.58 ms per origin (2115.74 ms / 200 origins)
+Surrogate Forward Pass (Dry Checkpoint),Per 256x256 tile (12 h horizon),"34.51 (p50: 34.43, p95: 35.42)",100 runs,Apple M1 MPS,9 tiles cover Camp Fire domain (310.5 ms total)
+Surrogate Forward Pass (Stand-in 3A Checkpoint),Per 256x256 tile (12 h horizon),"34.94 (p50: 34.79, p95: 36.46)",100 runs,Apple M1 MPS,Stand-in weights benchmark
+"Teacher v2 Full Simulation (Run 1, Seed 389)","Full 564x562 domain (12 h, 360 steps)",3583.4,1,Apple M1 MPS,"Burned 6,771 cells (2,437.6 ha)"
+"Teacher v2 Full Simulation (Run 2, Seed 117)","Full 564x562 domain (12 h, 360 steps)",2810.5,1,Apple M1 MPS,"Burned 26,232 cells (9,443.5 ha)"
+"Teacher v2 Full Simulation (Run 3, Seed 304)","Full 564x562 domain (12 h, 360 steps)",2272.1,1,Apple M1 MPS,"Burned 33,954 cells (12,223.4 ha)"
+"Teacher v2 Full Simulation (Run 4, Seed 100)","Full 564x562 domain (12 h, 360 steps)",2680.5,1,Apple M1 MPS,"Burned 48,832 cells (17,579.5 ha)"
+"Teacher v2 Full Simulation (Run 5, Seed 236)","Full 564x562 domain (12 h, 360 steps)",2389.6,1,Apple M1 MPS,"Burned 75,909 cells (27,327.2 ha)"
+Teacher v2 Full Simulation (Mean across 5 seeds),"Full 564x562 domain (12 h, 360 steps)",2747.21 (+/- 460.71),5 runs,Apple M1 MPS,"Min: 2272.1 ms, Max: 3583.4 ms"

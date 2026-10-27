@@ -147,6 +147,69 @@ uv pip install -e ".[dev]"
 
 ---
 
+## Pipeline Execution & Exact Commands
+
+### 1. Interactive Evacuation Replay Demo
+Operates 100% offline using precomputed simulation and routing assets in `out/demo/`:
+```bash
+# Launch interactive Streamlit demo in browser
+PYTHONPATH=src streamlit run app/demo.py
+
+# Run headless verification test (asserts 0 unhandled exceptions)
+PYTHONPATH=src:scripts .venv/bin/python scripts/test_demo_headless.py
+```
+
+### 2. Full Evacuation Replay Simulation & Empirical Hazard Audit
+Runs the 7 comparative agent configurations against 436 NIST empirical truth hazards (burnovers, roadblocks, abandoned vehicles):
+```bash
+# Run Step 2 (truth margins) and Step 3 (corridor timing error audit)
+PYTHONPATH=src:scripts .venv/bin/python scripts/step2_step3_margin_and_timing_audit.py
+```
+
+### 3. Surrogate Training & Verification
+Trains the 4,094,852-parameter `WindConditionedUNet` surrogate model:
+```bash
+# Train surrogate locally (dry-run on available shards)
+PYTHONPATH=src:scripts .venv/bin/python scripts/train_surrogate.py \
+  --data-dir data/shards_kaggle_today_dry \
+  --checkpoint-dir checkpoints/kaggle_today_dry \
+  --epochs 1 \
+  --batch-size 8
+
+# Run evaluation on held-out test fires (caldor, tamarack)
+PYTHONPATH=src:scripts .venv/bin/python scripts/eval_saved_checkpoint.py \
+  --checkpoint checkpoints/kaggle_today_dry/best.pt \
+  --shards-dir data/shards_kaggle_today_dry \
+  --out-dir reports/kaggle_today_dry
+```
+
+### 4. Kaggle Packaging & Notebook Generation
+Packages training fire tiles and generates the self-contained Kaggle GPU training notebook:
+```bash
+# Generate Kaggle standalone notebook with verified teacher hash
+python scripts/create_kaggle_today_notebook.py
+
+# Package codebase and verified training fire tiles for Kaggle upload
+python scripts/package_for_kaggle.py
+```
+
+---
+
+## Data Provenance & Cryptographic Hashes
+
+| File / Component | Relative Path | SHA-256 Checksum | Description |
+| :--- | :--- | :--- | :--- |
+| **Teacher v2 Config** | `configs/teacher_v2.yaml` | `a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5` | Frozen teacher simulation parameters |
+| **Teacher v2 Copy** | `out/wf052-teacher-config/teacher_v2.yaml` | `a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5` | Bit-identical config copy |
+| **Kaggle Shard 000** | `data/shards_kaggle_today_dry/shard_000.npz` | `acbf4a902098204f9ab0f8b5ec366e39ab658b42a480297f1a6f9c5d2be017aa` | 62-sample training shard |
+| **Dry Run Checkpoint** | `checkpoints/kaggle_today_dry/best.pt` | `2e0ea48408226065c71fa69b2d3544f8eaec38d975fb9017637841103c8c2e68` | Trained UNet weights (1 epoch dry run) |
+| **Stand-in Checkpoint** | `checkpoints/best.pt` | `1da984e7f3fb8fdb454f7331dd1aa2e8fa44e782d8c3fc38890ff456e7592cf1` | Stand-in smoke checkpoint (Phase 3A) |
+| **NIST Hazards GeoJSON**| `out/demo/hazards.geojson` | `2b8ea4ca7679ad3f368f51a46bca1387d7bbf1cfca28b0304a08f5d023f00995` | 436 empirical hazards from NIST TN 2252 |
+| **Replay Routes JSON** | `out/demo/routes.json` | `577dc110d9359e19890bc894c77c6870020a1740922e96dd8319f61b0c007137` | Replay evacuation routes for 193 unique nodes |
+| **Demo Metadata** | `out/demo/metadata.json` | `1115bbf0cb49a4635848bb247a32bf8814ec9f0e1a1796191b9fe35860e6e768` | Center lon/lat and zoom settings |
+
+---
+
 ## Model Limitations & Qualitative Clearance Notice
 
 > [!IMPORTANT]

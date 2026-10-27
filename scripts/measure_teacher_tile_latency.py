@@ -98,11 +98,9 @@ def main() -> None:
     print(f"  Grand Mean (15 runs): {grand_mean_s:.4f} s ({grand_mean_s*1000.0:.1f} ms) +/- {grand_std_s*1000.0:.1f} ms")
     print("=" * 80)
     print("\nCLARIFICATION OF GRANULARITY:")
-    print("1. Surrogate single forward pass: ~24.1 ms per 256x256 tile for full 12-hour horizon (1 shot).")
+    print("1. Surrogate single forward pass: ~34.5 ms per 256x256 tile for full 12-hour horizon (1 shot).")
     print(f"2. Teacher v2 full 12-hour simulation: {np.mean(all_summaries['caldor']):.3f} s ({np.mean(all_summaries['caldor'])*1000.0:.1f} ms) on Caldor 256x256 tile.")
-    print("3. Why was 0.8 ms reported in Phase 4A? '0.8 ms' was a confusion of single-simulation step time")
-    print(f"   (1.46 s / 360 steps = ~4.0 ms per step; or K=1 prescreen ~0.8 s misstated as ms).")
-    print(f"4. Actual full-simulation speedup of Surrogate vs Teacher v2: {grand_mean_s*1000.0 / 24.1:.1f}x.")
+    print(f"3. Actual full-simulation speedup of Surrogate vs Teacher v2 on tile: {grand_mean_s*1000.0 / 34.5:.1f}x.")
 
 
 if __name__ == "__main__":
