@@ -174,6 +174,18 @@ class SurrogateTrainer:
                     f"SurrogateTrainer rejected {len(rejected_frozen)} sample(s) whose hash differs or whose "
                     f"label source is not the frozen teacher. First rejection: '{s_id}' ({reason})."
                 )
+        elif isinstance(train_samples, CompactSurrogateDataset):
+            for sp in train_samples.shard_paths:
+                validate_shard_metadata(sp, expected_schema_version=SCHEMA_VERSION)
+                csv_p = sp.with_name(sp.stem + "_metadata.csv")
+                if csv_p.exists():
+                    df_meta = pd.read_csv(csv_p)
+                    bad_src = df_meta[~df_meta["source"].isin(["teacher_v2_ensemble", "teacher_v2_embers"])]
+                    if not bad_src.empty:
+                        raise ValueError(
+                            f"SurrogateTrainer rejected shard '{sp.name}' with invalid label source: "
+                            f"'{bad_src['source'].iloc[0]}'. Only frozen teacher labels are permitted."
+                        )
 
         if device is None:
             self.device = torch.device(

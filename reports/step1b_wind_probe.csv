@@ -1,0 +1,3 @@
+probe,mean_abs_delta_burn_prob,pct_change_burn_prob,mean_abs_delta_q50_min,pct_change_q50,film_used
+wind_replaced,0.508423,98.899,194.9302,97.545,True
+wind_zeroed,0.043526,8.467,6.4854,3.245,True
