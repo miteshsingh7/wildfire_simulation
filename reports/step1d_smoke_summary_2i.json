@@ -1,0 +1,176 @@
+{
+  "elapsed_seconds": 459.73,
+  "total_attempts": 293,
+  "total_accepted": 66,
+  "fire_visits": {
+    "bobcat": 15,
+    "caldor": 52,
+    "creek": 60,
+    "glass": 79,
+    "kincade": 33,
+    "tamarack": 33,
+    "zogg": 21
+  },
+  "fire_bin_counts": {
+    "bobcat": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "caldor": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "creek": [
+      2,
+      2,
+      2,
+      2,
+      0
+    ],
+    "glass": [
+      2,
+      2,
+      2,
+      2,
+      0
+    ],
+    "kincade": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "tamarack": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "zogg": [
+      2,
+      2,
+      2,
+      2,
+      2
+    ]
+  },
+  "fire_bin_closed_by": {
+    "bobcat": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "quota"
+    ],
+    "caldor": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "quota"
+    ],
+    "creek": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "stall"
+    ],
+    "glass": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "stall"
+    ],
+    "kincade": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "quota"
+    ],
+    "tamarack": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "quota"
+    ],
+    "zogg": [
+      "quota",
+      "quota",
+      "quota",
+      "quota",
+      "quota"
+    ]
+  },
+  "fire_bin_attempts": {
+    "bobcat": [
+      5,
+      2,
+      4,
+      2,
+      2
+    ],
+    "caldor": [
+      14,
+      13,
+      14,
+      9,
+      2
+    ],
+    "creek": [
+      5,
+      21,
+      23,
+      11,
+      0
+    ],
+    "glass": [
+      12,
+      18,
+      13,
+      17,
+      0
+    ],
+    "kincade": [
+      12,
+      11,
+      5,
+      3,
+      2
+    ],
+    "tamarack": [
+      8,
+      12,
+      8,
+      2,
+      3
+    ],
+    "zogg": [
+      4,
+      5,
+      7,
+      3,
+      2
+    ]
+  },
+  "fire_group0_rejections": {
+    "bobcat": 0,
+    "caldor": 0,
+    "creek": 0,
+    "glass": 19,
+    "kincade": 0,
+    "tamarack": 0,
+    "zogg": 0
+  }
+}

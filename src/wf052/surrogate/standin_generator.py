@@ -791,6 +791,8 @@ class RejectionSamplingReport:
     k1_sim_times: list[float] | None = None
     extra_seed_times: list[float] | None = None
     attempt_records: list[dict[str, Any]] | None = None
+    fire_bin_closed_by: dict[str, list[str]] | None = None
+    fire_visits: dict[str, int] | None = None
 
     def to_markdown(self) -> str:
         """Format report as a clean markdown table."""
@@ -1200,8 +1202,9 @@ def format_fire_bin_table(
     quotas_per_fire: dict[str, list[int]],
     accepted_by_fire_bin: dict[str, list[int]],
     attempts_by_fire_bin: dict[str, list[int]],
+    closed_by_fire_bin: dict[str, list[str]] | None = None,
 ) -> str:
-    """Format per-fire x bin table showing target, accepted, and attempts."""
+    """Format per-fire x bin table showing target, accepted, attempts, and optional closure status."""
     header = ["Fire"] + [f"Bin {b} ({b_name})" for b, b_name in enumerate(bin_names)] + ["Total Acc / Tgt"]
     lines = [
         "| " + " | ".join(header) + " |",
@@ -1219,7 +1222,11 @@ def format_fire_bin_table(
             tgt = quotas_per_fire.get(f, [0] * len(bin_names))[b]
             acc = accepted_by_fire_bin.get(f, [0] * len(bin_names))[b]
             att = attempts_by_fire_bin.get(f, [0] * len(bin_names))[b]
-            row_cells.append(f"{acc}/{tgt} ({att} att)")
+            if closed_by_fire_bin is not None and f in closed_by_fire_bin:
+                cb = closed_by_fire_bin[f][b]
+                row_cells.append(f"{acc}/{tgt} ({att} att, {cb})")
+            else:
+                row_cells.append(f"{acc}/{tgt} ({att} att)")
         lines.append(f"| `{f}` | " + " | ".join(row_cells) + f" | {f_acc}/{f_tgt} |")
 
     lines.append(
@@ -1230,6 +1237,28 @@ def format_fire_bin_table(
         )
         + f" | **{total_acc_all}/{total_tgt_all}** |"
     )
+    return "\n".join(lines)
+
+
+def format_fire_bin_status_table(
+    fire_names: Sequence[str],
+    bin_names: Sequence[str],
+    quotas_per_fire: dict[str, list[int]],
+    accepted_by_fire_bin: dict[str, list[int]],
+    closed_by_fire_bin: dict[str, list[str]],
+) -> str:
+    """Format per (fire, bin) table showing Target, Accepted, and Closed By status."""
+    header = ["Fire", "Bin", "Bin Name", "Target", "Accepted", "Closed By"]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    for f in fire_names:
+        for b, b_name in enumerate(bin_names):
+            tgt = quotas_per_fire.get(f, [0] * len(bin_names))[b]
+            acc = accepted_by_fire_bin.get(f, [0] * len(bin_names))[b]
+            cb = closed_by_fire_bin.get(f, ["open"] * len(bin_names))[b]
+            lines.append(f"| `{f}` | Bin {b} | `{b_name}` | {tgt} | {acc} | **{cb}** |")
     return "\n".join(lines)
 
 
@@ -1253,6 +1282,7 @@ def generate_stratified_samples_rejection(
     mode: str = "smoke",
     scenarios_per_fire: int | None = None,
     attempt_log_path: str | Path | None = None,
+    stall_cap: int | None = None,
 ) -> tuple[list[SurrogateSample], RejectionSamplingReport]:
     """Generate training samples using round-robin stratified rejection sampling.
 
@@ -1402,6 +1432,30 @@ def generate_stratified_samples_rejection(
     attempts_by_fire_bin: dict[str, list[int]] = {f: [0] * num_bins for f in fire_names}
     group0_rejections_by_fire: dict[str, int] = {f: 0 for f in fire_names}
 
+    if stall_cap is None:
+        if "STALL_CAP" in os.environ:
+            stall_cap = int(os.environ["STALL_CAP"])
+        else:
+            stall_cap = 60 if mode == "smoke" else 400
+
+    # Per (fire, bin) state
+    closed_by_fire_bin: dict[str, list[str]] = {
+        f: ["quota" if quotas_per_fire[f][b] == 0 else "open" for b in range(num_bins)]
+        for f in fire_names
+    }
+    consecutive_sims_without_acc: dict[str, list[int]] = {
+        f: [0] * num_bins for f in fire_names
+    }
+    fire_visits: dict[str, int] = {f: 0 for f in fire_names}
+
+    def bin_is_open(f: str, b: int) -> bool:
+        if closed_by_fire_bin[f][b] != "open":
+            return False
+        return accepted_by_fire_bin[f][b] < quotas_per_fire[f][b]
+
+    def fire_is_open(f: str) -> bool:
+        return any(bin_is_open(f, b) for b in range(num_bins))
+
     current_fire_idx = 0
     attempt = 0
     t0_rejection = time.perf_counter()
@@ -1411,16 +1465,8 @@ def generate_stratified_samples_rejection(
     extra_seed_times: list[float] = []
     attempt_records: list[dict[str, Any]] = []
 
-    def fire_is_open(f: str) -> bool:
-        for b in range(num_bins):
-            q = quotas_per_fire[f][b]
-            if q > 0 and accepted_by_fire_bin[f][b] < q:
-                if max_attempts_per_bin is None or attempts_by_fire_bin[f][b] < max_attempts_per_bin:
-                    return True
-        return False
-
     while True:
-        # Check if all fires have fulfilled quotas or capped attempts
+        # Check if all fires have fulfilled quotas or stalled
         if not any(fire_is_open(f) for f in fire_names):
             break
 
@@ -1436,20 +1482,23 @@ def generate_stratified_samples_rejection(
             print(f"Wall-clock cap of {max_wall_sec / 60.0:.1f} minutes reached. Stopping cleanly.", flush=True)
             break
 
-        # Advance current_fire_idx to the next open fire in round-robin order
-        found_open = False
+        # Advance current_fire_idx to the next open fire in strict round-robin order
+        active_idx = None
         for step in range(n_fires):
-            idx = (current_fire_idx + step) % n_fires
-            if fire_is_open(fire_names[idx]):
-                current_fire_idx = idx
-                found_open = True
+            cand_idx = (current_fire_idx + step) % n_fires
+            if fire_is_open(fire_names[cand_idx]):
+                active_idx = cand_idx
                 break
 
-        if not found_open:
+        if active_idx is None:
             break
 
-        active_fire = fire_names[current_fire_idx]
-        f_info = cached_fires[current_fire_idx]
+        active_fire = fire_names[active_idx]
+        f_info = cached_fires[active_idx]
+        fire_visits[active_fire] += 1
+
+        # Strict round-robin rule: pointer advances after EVERY candidate (accepted, rejected, fuel-0)
+        current_fire_idx = (active_idx + 1) % n_fires
 
         t_att0 = time.perf_counter()
         attempt += 1
@@ -1476,6 +1525,10 @@ def generate_stratified_samples_rejection(
         v_j = (wind_base[:, 0] * sin_j + wind_base[:, 1] * cos_j) * spd_mult
         hourly_wind_perturbed = np.stack([u_j, v_j], axis=-1).astype(np.float32)
 
+        cand_speeds = np.hypot(hourly_wind_perturbed[:, 0], hourly_wind_perturbed[:, 1])
+        cand_wind_mean = float(np.mean(cand_speeds))
+        cand_wind_peak = float(np.max(cand_speeds))
+
         ign_r, ign_c = calculate_upwind_third_ignition(
             hourly_wind_uv=hourly_wind_perturbed,
             tile_shape=tile_size,
@@ -1497,6 +1550,8 @@ def generate_stratified_samples_rejection(
                 "fbfm40": int(f_info["fbfm"][ign_r, ign_c]),
                 "fuel_grp": fuel_grp_at_ign,
                 "is_fuel_0": True,
+                "wind_mean": round(cand_wind_mean, 4),
+                "wind_peak": round(cand_wind_peak, 4),
                 "k1_sim_sec": 0.0,
                 "bf_k1": float("nan"),
                 "bin_k1": -1,
@@ -1579,12 +1634,23 @@ def generate_stratified_samples_rejection(
         bin_k1 = assign_burn_fraction_bin(bf_k1, bin_edges=bin_edges)
         attempts_by_fire_bin[active_fire][bin_k1] += 1
 
-        # STEP 3 RULE: Accept if fire's bin quota is open
-        quota_val = quotas_per_fire[active_fire][bin_k1]
-        is_open = (
-            accepted_by_fire_bin[active_fire][bin_k1] < quota_val
-            and (max_attempts_per_bin is None or attempts_by_fire_bin[active_fire][bin_k1] <= max_attempts_per_bin)
-        )
+        is_open = bin_is_open(active_fire, bin_k1)
+
+        # Update stall tracking for open bins of active_fire
+        for b in range(num_bins):
+            if closed_by_fire_bin[active_fire][b] == "open":
+                if b == bin_k1 and is_open:
+                    consecutive_sims_without_acc[active_fire][b] = 0
+                else:
+                    consecutive_sims_without_acc[active_fire][b] += 1
+                    if consecutive_sims_without_acc[active_fire][b] >= stall_cap:
+                        closed_by_fire_bin[active_fire][b] = "stall"
+                        logger.info(
+                            "Fire '%s' bin %d closed by stall after %d consecutive sims without acceptance.",
+                            active_fire,
+                            b,
+                            stall_cap,
+                        )
 
         dur_extra_seeds: list[float] = []
 
@@ -1681,9 +1747,8 @@ def generate_stratified_samples_rejection(
             accepted_samples.append(sample)
             accepted_by_fire[active_fire].append(sample)
             accepted_by_fire_bin[active_fire][bin_k1] += 1
-
-            # STEP 3 RULE: Advance round-robin pointer to next fire!
-            current_fire_idx = (current_fire_idx + 1) % n_fires
+            if accepted_by_fire_bin[active_fire][bin_k1] >= quotas_per_fire[active_fire][bin_k1]:
+                closed_by_fire_bin[active_fire][bin_k1] = "quota"
 
         att_dur = time.perf_counter() - t_att0
         attempt_durations.append(att_dur)
@@ -1696,6 +1761,8 @@ def generate_stratified_samples_rejection(
             "fbfm40": int(f_info["fbfm"][ign_r, ign_c]),
             "fuel_grp": fuel_grp_at_ign,
             "is_fuel_0": False,
+            "wind_mean": round(cand_wind_mean, 4),
+            "wind_peak": round(cand_wind_peak, 4),
             "k1_sim_sec": round(dur_k1, 6),
             "bf_k1": round(bf_k1, 6),
             "bin_k1": bin_k1,
@@ -1747,8 +1814,18 @@ def generate_stratified_samples_rejection(
         quotas_per_fire=quotas_per_fire,
         accepted_by_fire_bin=accepted_by_fire_bin,
         attempts_by_fire_bin=attempts_by_fire_bin,
+        closed_by_fire_bin=closed_by_fire_bin,
     )
-    print("\n--- Per Fire x Bin Table (Target, Accepted, Attempts) ---\n" + tbl_str + "\n", flush=True)
+    print("\n--- Per Fire x Bin Table (Target, Accepted, Attempts, Status) ---\n" + tbl_str + "\n", flush=True)
+
+    status_tbl_str = format_fire_bin_status_table(
+        fire_names=fire_names,
+        bin_names=bin_names,
+        quotas_per_fire=quotas_per_fire,
+        accepted_by_fire_bin=accepted_by_fire_bin,
+        closed_by_fire_bin=closed_by_fire_bin,
+    )
+    print("\n--- Per (Fire, Bin) Status Table ---\n" + status_tbl_str + "\n", flush=True)
 
     if attempt_log_path is not None:
         p_log = Path(attempt_log_path)
@@ -1770,6 +1847,8 @@ def generate_stratified_samples_rejection(
         k1_sim_times=k1_sim_times,
         extra_seed_times=extra_seed_times,
         attempt_records=attempt_records,
+        fire_bin_closed_by=closed_by_fire_bin,
+        fire_visits=fire_visits,
     )
 
     return accepted_samples, report

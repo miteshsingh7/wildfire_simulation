@@ -1,0 +1,11 @@
+group,wind_metric,wind_bin,candidate_count,median_burned_fraction,p90_burned_fraction,bf_bin0_count,bf_bin1_count,bf_bin2_count,bf_bin3_count,bf_bin4_count
+Pooled,wind_mean,<2,29,0.347214,0.743527,1,0,5,13,10
+Pooled,wind_mean,2-4,53,0.107361,0.296594,4,8,13,27,1
+Pooled,wind_mean,4-8,88,0.006691,0.072342,30,27,24,7,0
+Pooled,wind_mean,8-12,85,0.010803,0.043579,22,36,27,0,0
+Pooled,wind_mean,>=12,19,0.01535,0.029306,3,11,5,0,0
+Pooled,wind_peak,<2,13,0.439651,0.838412,1,0,1,6,5
+Pooled,wind_peak,2-4,30,0.186279,0.647091,0,1,8,15,6
+Pooled,wind_peak,4-8,61,0.075974,0.174377,7,12,19,23,0
+Pooled,wind_peak,8-12,54,0.002823,0.063928,23,16,13,2,0
+Pooled,wind_peak,>=12,116,0.011062,0.040474,29,53,33,1,0

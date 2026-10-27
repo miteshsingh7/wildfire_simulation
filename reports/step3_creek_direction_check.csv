@@ -1,0 +1,5 @@
+ignition_setup,target_direction,u_ms,v_ms,ign_r,ign_c,mean_delta_row,mean_delta_col,mean_burned_cells,empirical_compass
+Creek_Center_128_128,East,8.0,0.0,128,128,0.42,-0.12,17.1,None
+Creek_Center_128_128,Northeast,5.66,5.66,128,128,-0.41,-0.51,8.0,None
+Creek_Upwind_128_40,East,8.0,0.0,128,40,0.85,5.51,43.5,East
+Creek_Upwind_128_40,Northeast,5.66,5.66,128,40,-2.97,1.83,71.0,NorthEast
