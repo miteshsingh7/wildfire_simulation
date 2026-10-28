@@ -455,6 +455,26 @@
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
 
+  function haversineDistanceKm(coords) {
+    if (!coords || !Array.isArray(coords) || coords.length < 2) return null;
+    let totalKm = 0.0;
+    const R = 6371.0088;
+    for (let i = 0; i < coords.length - 1; i++) {
+      const [lon1, lat1] = coords[i];
+      const [lon2, lat2] = coords[i + 1];
+      const phi1 = (lat1 * Math.PI) / 180.0;
+      const phi2 = (lat2 * Math.PI) / 180.0;
+      const deltaPhi = ((lat2 - lat1) * Math.PI) / 180.0;
+      const deltaLambda = ((lon2 - lon1) * Math.PI) / 180.0;
+      const a =
+        Math.sin(deltaPhi / 2.0) * Math.sin(deltaPhi / 2.0) +
+        Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2.0) * Math.sin(deltaLambda / 2.0);
+      const c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+      totalKm += R * c;
+    }
+    return totalKm;
+  }
+
   // RENDER ROUTE EVALUATION CARDS
   function renderRouteCards() {
     const data = window.DEMO_DATA;
@@ -476,16 +496,17 @@
       card.className = "route-card";
       card.style.borderLeftColor = style.color;
 
-      const distKm = mData.distance_km || 0.0;
+      const routeLengthKm = haversineDistanceKm(mData.path);
       const isTrapped = Boolean(mData.trapped);
-      const isMiss = Boolean(mData.hazard_miss);
+      const isHit = Boolean(mData.hazard_miss);
       const margin = mData.margin_min;
+      const isInfMargin = margin === null || margin === undefined || margin === Infinity || mData.margin_state === "no_hazard";
 
       let marginHtml = "";
       if (isTrapped) {
         marginHtml = `<span class="margin-chip trapped">trapped (no route)</span>`;
-      } else if (margin === null || margin === undefined || mData.margin_state === "no_hazard" || margin === Infinity) {
-        marginHtml = `<span class="margin-chip neutral">No hazard on route</span>`;
+      } else if (isInfMargin) {
+        marginHtml = `<span class="margin-chip neutral" style="font-size:9px;">No predicted fire arrival on route (agent's own field)</span>`;
       } else if (margin < 0) {
         marginHtml = `<span class="margin-chip negative">${margin.toFixed(1)} min</span>`;
       } else {
@@ -495,10 +516,12 @@
       let stateText = "";
       if (isTrapped) {
         stateText = `<span style="color:var(--error); font-size:9px; font-weight:700;">🚫 TRAPPED (No route)</span>`;
-      } else if (isMiss) {
-        stateText = `<span style="color:var(--error); font-size:9px; font-weight:700;">⚠️ HAZARD OVERRUN</span>`;
+      } else if (isInfMargin) {
+        stateText = `<span style="color:var(--outline); font-size:9px; font-weight:600;">No predicted fire arrival on route (agent's own field)</span>`;
+      } else if (margin < 0) {
+        stateText = `<span style="color:var(--error); font-size:9px; font-weight:700;">${margin.toFixed(1)} min predicted margin</span>`;
       } else {
-        stateText = `<span style="color:var(--outline); font-size:9px; font-weight:600;">No hazard on route (not a safety margin)</span>`;
+        stateText = `<span style="color:var(--outline); font-size:9px; font-weight:600;">+${margin.toFixed(1)} min predicted margin</span>`;
       }
 
       const standinChip = mKey === "agent_a3" ? `<span class="chip-standin">STAND-IN (untrained surrogate)</span>` : "";
@@ -513,11 +536,15 @@
             <div>${stateText}</div>
           </div>
           <div style="font-family:var(--font-mono); font-size:10px; color:var(--on-surface-variant); margin-bottom:2px;">
-            Route travel time: NOT AVAILABLE | Distance: ${distKm > 0 ? distKm.toFixed(2) + " km" : "NOT AVAILABLE"}
+            Route length (from path geometry): <strong>${routeLengthKm !== null ? routeLengthKm.toFixed(2) + " km" : "NOT AVAILABLE"}</strong>
           </div>
           <div style="display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:10px; margin-top:2px;">
             <span>Predicted margin (agent's own field):</span>
             ${marginHtml}
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--on-surface-variant); margin-top:2px;">
+            <span title="includes the modelled abandoned-vehicle onset (87 min constant); not a fire-arrival measure" style="cursor:help; border-bottom:1px dotted var(--outline);">Hits NIST hazard:</span>
+            <span title="includes the modelled abandoned-vehicle onset (87 min constant); not a fire-arrival measure" style="cursor:help;">${isHit ? `<strong style="color:var(--error); font-weight:700;">yes</strong>` : `<strong style="color:var(--outline); font-weight:700;">no</strong>`}</span>
           </div>
           <div style="display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--on-surface-variant); margin-top:2px;">
             <span>Margin to NIST burnovers:</span>

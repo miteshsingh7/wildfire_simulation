@@ -125,19 +125,23 @@ def run_verification() -> None:
 
             assert "Predicted margin (agent's own field)" in text, "Card missing 'Predicted margin (agent's own field)' label!"
             assert "Margin to NIST burnovers:" in text and "NOT AVAILABLE" in text, "Card missing 'Margin to NIST burnovers: NOT AVAILABLE'!"
+            assert "Hits NIST hazard:" in text, "Card missing 'Hits NIST hazard:' label!"
+            assert "Route length (from path geometry):" in text, "Card missing 'Route length (from path geometry):'!"
 
-        # Now select origin 86372730 (index 1) which has clear passage for A2-assim and B on A3
-        print("    Testing Origin #86372730 for neutral state text...")
-        page.select_option("#originPickerSelect", index=1)
+        # Now test origin 5383262919: static and A2-pure have margin Infinity and hazard_miss true
+        print("    Testing Origin #5383262919 for infinity margin and NIST hazard hit...")
+        page.select_option("#originPickerSelect", value="5383262919")
         page.wait_for_timeout(300)
-        route_cards_orig1 = page.locator("#routeCardsContainer .route-card").all()
-        found_neutral_state = False
-        for card in route_cards_orig1:
+        route_cards_orig = page.locator("#routeCardsContainer .route-card").all()
+        found_inf_label = False
+        for card in route_cards_orig:
             text = card.inner_text()
-            if "No hazard on route (not a safety margin)" in text:
-                found_neutral_state = True
-                print("      PASS: Card displays neutral state text: 'No hazard on route (not a safety margin)'.")
-        assert found_neutral_state, "Expected at least one route card on origin #86372730 to display 'No hazard on route (not a safety margin)'!"
+            if "A0 static" in text or "A2-pure" in text:
+                assert "No predicted fire arrival on route (agent's own field)" in text, "Static/A2-pure missing infinity margin label!"
+                assert "Hits NIST hazard:\nyes" in text or "Hits NIST hazard:\n yes" in text or ("Hits NIST hazard" in text and "yes" in text), "Missing Hits NIST hazard: yes!"
+                found_inf_label = True
+        assert found_inf_label, "Expected infinity-margin label on origin #5383262919 static and A2-pure cards!"
+        print("      PASS: Origin #5383262919 verified with 'No predicted fire arrival on route (agent's own field)' and 'Hits NIST hazard: yes'.")
 
         # -------------------------------------------------------------
         # Test 4: Tab Overlays (Zones, Latency, Status)
