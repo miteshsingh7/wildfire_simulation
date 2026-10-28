@@ -223,14 +223,14 @@ python scripts/package_for_kaggle.py
 ### What the System CAN Claim
 1. **Inference Time of an Untrained Architecture**: The PyTorch neural surrogate forward pass executes in 34.51 ms per $256 \times 256$ tile on Apple M1 GPU (`mps`), requiring 310.59 ms across 9 tiles for domain coverage; no fidelity claim is made (cite `reports/step4_latency_summary.csv`, rows 2 and 3).
 2. **Interactive Evacuation Re-Planning**: The network router evaluates evacuation routes across all 200 origins in 2,115.74 ms (10.58 ms per origin), enabling interactive replanning within 30-minute operational cycles (cite `reports/step4_latency_summary.csv`, row 1).
-3. **Burnover Avoidance via Directional Buffering (Agent B)**: Negative burnover margins at 60 m are 1 of 177 for static and 0 for all other methods; B traps 6 origins versus 0 for static; at 30 m B on A2-assim has median 35.9 versus 84.5 for static; no paired test or CI computed (NOT COMPUTED); inconclusive (cite `reports/step2_hazard_type_margins.csv`, rows 8, 13, 1, 6).
-4. **Burnover Timing Error in Physics Teacher**: At seed 42, 8 of the 10 burnovers on the three corridors never burn in the teacher and the other 2 arrive +157 min late (cite `reports/step2_timing_by_hazard_type.csv`, rows 1, 5, 9; Clark Rd burnovers $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$).
+3. **Burnover margins by method (inconclusive)**: Negative burnover margins at 60 m are 1 of 177 for static and 0 for all other methods; B traps 6 origins versus 0 for static; at 30 m B on A2-assim has median 35.9 versus 84.5 for static; at 30 m the B on A2-assim median 35.9 comes from n=13 origins, static median 84.5 from n=118; no paired test or CI computed (NOT COMPUTED); inconclusive (cite `reports/step2_hazard_type_margins.csv`, rows 8, 13, 1, 6).
+4. **Burnover Timing Error in Physics Teacher**: At seed 42, 8 of the 10 burnovers on the three corridors never burn in the teacher and the other 2 arrive with median +157 min over the 2 finite burnovers (Pentz/Hwy 70) (cite `reports/step2_timing_by_hazard_type.csv`, rows 1, 5, 9; Clark Rd burnovers $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$). Seed 42 is a low-area seed (5,491 ha, about the 5th percentile of the 20-seed arm c; cite `reports/teacher_v2_camp_fire_20seeds.csv`). The ensemble burnover finite counts from reports/step2_timing_by_hazard_type.csv are: Clark Rd 1 of 6, Skyway 0 of 2, Pentz/Hwy 70 2 of 2. This is a teacher check against 10 burnovers.
 
 ### What the System CANNOT Claim
 1. **NO Safety Guarantees**: This software is an academic engineering demonstration. It does NOT certify safe evacuation routes and must never be used for real-time emergency navigation or life-safety decisions.
-2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -37.0 min versus -31.5 min for A0 static (cite `reports/step2_truth_margin_vs_nist_hazards.csv`, rows 5 and 2) because re-routing onto alternative roads did not bypass town-wide abandoned vehicles.
-3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone cannot predict road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (roadblocks and satellite perimeters) that share an underlying source document with the empirical truth hazards.
-4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a single smoke tile (85.5% burned) and cannot be claimed as validated surrogates.
+2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -37.0 min versus -31.5 min for A0 static (cite `reports/step2_truth_margin_vs_nist_hazards.csv`, rows 5 and 2); cause not tested.
+3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone: teacher field not validated against road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (observed detections and roadblocks) that share an underlying source document with the empirical truth hazards.
+4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a checkpoint from phase 3A trained 2 epochs on 66 smoke shards; the A3-reignite tile burned 85.5 percent and cannot be claimed as validated surrogates.
 
 ---
 
@@ -253,7 +253,25 @@ python scripts/package_for_kaggle.py
 9. **Route Redundancy**: Agents A and A2-pure produce identical routes in every comparative table.
 10. **Surrogate Domain Over-Burn & Architecture Constraints**: The Phase 4A surrogate output covered the whole domain (IoU 0.1942 equals observed area over domain area) and comes from an untrained model; the surrogate is single-ignition and the Camp Fire ignition lies outside its tile; Phase 4B's A3-reignite burned 85.5 percent of its tile.
 11. **No Held-Out Teacher Test**: No held-out teacher fire test was conducted.
-12. **No Trained Surrogate Result**: No trained surrogate result is claimed unless a Kaggle or local checkpoint is reported in an appendix.
+12. **No Trained Surrogate Result**: No trained surrogate result is reported in this version.
 13. **Retracted Figures**: Phase 4B's narrative 24.1 ms forward pass and 56.4x speedup are retracted as unmeasured estimates. The measured numbers are 34.51 ms per tile (39.39x tile speedup; cite `reports/step4_latency_summary.csv`) and 310.59 ms domain coverage (8.85x domain speedup; cite `reports/step4_latency_summary.csv`).
+
+---
+
+## Untracked Local Dependencies & Reconstruction Guide
+
+The following directories and files are required by specific offline commands but are excluded from version control by `.gitignore` due to size:
+
+| Path | Size | Required By | How to Obtain / Regenerate |
+| :--- | :--- | :--- | :--- |
+| `data/tiles/` | 37M | Simulation & Replay (`step2_hazard_type_margin_and_timing.py`) | Generated from raw raster/vector sources via `scripts/audit_and_export_road_graph.py` and `scripts/prepare_training_fires_data.py`. |
+| `data/tiles/fires/` | 11M | Surrogate Training & Packaging | Downloaded or extracted via `scripts/prepare_training_fires_data.py` (7 non-Camp fires). |
+| `data/shards_kaggle_today_dry/` | 1.7M | Local Surrogate Training & Eval | Generated via `scripts/train_surrogate.py` dry-run or `scripts/standin_generator.py`. |
+| `data/raw/` | 1.7G | Raw Ingestion Pipeline | Downloaded from LANDFIRE, HRRR, and NIST archives. |
+| `checkpoints/` | 282M | Model Evaluation (`eval_saved_checkpoint.py`) | Generated via `scripts/train_surrogate.py` or trained on Kaggle GPU. |
+| `out/camp_fire_60m/` | 4.8M | Teacher Arrival Cache | Regenerated by running `scripts/evaluate_heldout_camp_fire.py`. |
+
+### Runtime Status for `app/demo.py`
+All data required at runtime by `app/demo.py` (`metadata.json`, `routes.json`, `hazards.geojson`, `updates.geojson`, `zones.geojson`, `zones_summary.csv`, `isochrones/`, and `perimeters/`) reside in `out/demo/` (19M), which is **100% tracked in git**. Zero untracked files are needed to run the interactive demo or `scripts/test_demo_headless.py`.
 
 

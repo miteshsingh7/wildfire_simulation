@@ -1,0 +1,20 @@
+{
+"type": "FeatureCollection",
+"name": "updates",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "update_step_min": 0.0, "hour_index": 0, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 1377.74 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 30.0, "hour_index": 0, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 392.01 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 60.0, "hour_index": 1, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 433.96 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 90.0, "hour_index": 1, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 433.45 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 120.0, "hour_index": 2, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 398.06 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 150.0, "hour_index": 2, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 351.76 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 180.0, "hour_index": 3, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 365.93 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 210.0, "hour_index": 3, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 364.23 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 240.0, "hour_index": 4, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 350.46 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 270.0, "hour_index": 4, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 351.24 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 300.0, "hour_index": 5, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 352.96 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 330.0, "hour_index": 5, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 422.15 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } },
+{ "type": "Feature", "properties": { "update_step_min": 360.0, "hour_index": 6, "frac_cells_changed": 0.0, "origins_route_changed": 0, "surrogate_inf_ms": 368.98 }, "geometry": { "type": "Point", "coordinates": [ -121.575771590815094, 39.759189073904459 ] } }
+]
+}

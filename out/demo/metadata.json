@@ -1,0 +1,12 @@
+{
+  "title": "Camp Fire Evacuation Replay Demo",
+  "weights_status": "STAND-IN WEIGHTS (Phase 3A Smoke Checkpoint)",
+  "development_case": "Camp Fire 2018 (NEVER in surrogate training)",
+  "center_lon": -121.6,
+  "center_lat": 39.759,
+  "zoom": 11.2,
+  "origins_count": 200,
+  "hazards_count": 436,
+  "horizon_min": 360.0,
+  "update_interval_min": 30.0
+}

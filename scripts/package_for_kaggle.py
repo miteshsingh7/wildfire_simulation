@@ -127,8 +127,8 @@ def build_wf052_code_zip(
     if zip_dest.exists():
         zip_dest.unlink()
 
-    included_dirs = ["src", "configs", "scripts"]
-    included_files = ["pyproject.toml"]
+    included_dirs = ["src", "configs", "scripts", "app"]
+    included_files = ["pyproject.toml", "README.md", "REPORT.md"]
 
     with zipfile.ZipFile(zip_dest, "w", zipfile.ZIP_DEFLATED) as zf:
         # Write GIT_COMMIT.txt into archive root
@@ -266,6 +266,18 @@ def build_kaggle_packages(
     )
     # Copy pyproject.toml
     shutil.copy2(pyproject_file, code_dir / "pyproject.toml")
+
+    app_dir = repo_root / "app"
+    if app_dir.exists():
+        shutil.copytree(
+            app_dir,
+            code_dir / "app",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".DS_Store"),
+        )
+    for doc in ["README.md", "REPORT.md"]:
+        doc_p = repo_root / doc
+        if doc_p.exists():
+            shutil.copy2(doc_p, code_dir / doc)
 
     # Write GIT_COMMIT.txt into wf052-code
     commit_info_file = code_dir / "GIT_COMMIT.txt"

@@ -11,11 +11,14 @@
 
 ## 1. Status Overview
 
+- **Perimeter projection accuracy**: Teacher median IoU 0.3147 versus GeoMAC 1052 over 20 seeds (cite `reports/step3a_perimeter_metrics.csv`, row 3); surrogate not done, untrained weights.
+- **Route-safety margin**: Done with caveats (predicted margins vacuous, smallest positive 149.8 min; burnover truth margins cite `reports/step2_hazard_type_margins.csv`).
+- **Re-plan latency**: Done (2,115.74 ms per update over 200 origins, 10.58 ms per origin, 310.59 ms for 9 surrogate tiles; cite `reports/step4_latency_summary.csv`, rows 1, 2).
 - **Physics Teacher (Contact + Embers)**: Done with caveats (calibrated contact plus ember model; under-burns Camp Fire by about 2x, over-burns training fires; cite `reports/step6_ember_ablation_summary.csv`, row 4).
 - **Surrogate Neural Architecture (WindConditionedUNet)**: Done (4,094,852 parameters, quantile heads $q_{10}/q_{50}/q_{90}$ + burn probability, FiLM wind conditioning).
 - **Surrogate Shard Generation & Sampler**: Done (sampler stall resolved in Phase 2I; dry run shard with 62 samples across 7 fires; cite `reports/step1_sample_counts.csv`).
 - **Base-rate Bias Init & Evaluation Module**: Done (base-rate init to train mean logit, per-bin quantile MAE/Brier/IoU metrics, canonical splits enforced; cite `reports/kaggle_today_dry/test_eval.csv`).
-- **Surrogate GPU Training on Full Dataset**: Not done (Kaggle notebook generated and verified; full multi-epoch GPU training run pending external Kaggle execution).
+- **Surrogate GPU Training on Full Dataset**: Not done (no full-data training run was completed).
 - **Causal Replay Harness (Camp Fire Development Case)**: Done with caveats (7 comparative agents evaluated; Camp Fire is strictly unseen development case; stand-in weights used for A3).
 - **NIST Empirical Hazard Safety Margins (Burnovers, Roadblocks, Abandoned Vehicles)**: Done with caveats (burnovers and roadblocks have empirical timestamps; abandoned vehicles have modelled constant onset at 87.0 min set in `src/wf052/replay/harness.py` line 133 as a harness assumption, not an observation).
 - **Hazard Corridor Timing Error Analysis**: Done (deduped by unique hazard ID; Clark Rd $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$ for burnovers; cite `reports/step2_timing_by_hazard_type.csv`).
@@ -25,11 +28,11 @@
 
 ## 2. Abandoned-Vehicle Onset Provenance
 
-- **Code Location**: [`src/wf052/replay/harness.py`](file:///Users/miteshsingh/Documents/projects/wf052/src/wf052/replay/harness.py), line 133:
-  ```python
-  onset_elapsed_min=87.0,  # 08:00 PST town-wide overrun onset
-  ```
-- **Provenance Status**: This is a **harness assumption**, NOT an observed timestamp from NIST. In NIST TN 2252 supplementary Table H-2, abandoned vehicles were inventoried post-fire (location, street, lane, whether burned), but individual vehicle abandonment timestamps were not recorded. The replay harness assigned a constant synthetic onset of 87.0 minutes (08:00 PST, 87 minutes after 06:33 ignition) across all 235 vehicles as an assumed town-wide overrun onset. Every abandoned-vehicle row in this report and repository documentation is strictly designated as a **modelled constant onset, not an observation**.
+- **Input File Path**: `data/tiles/nist_abandoned_vehicles_h2.parquet`
+- **Input File Columns**: `['av_id', 'street', 'direction', 'lane', 'flow', 'color', 'vehicle_type', 'burned', 'latitude', 'longitude', 'source', 'geometry']`
+- **Timestamp Column**: Does not exist (no timestamp column present in the input file).
+- **Onset Assumption**: Onset set at `src/wf052/replay/harness.py` line 133 (`onset_elapsed_min=87.0`), harness assumption; NIST source document NOT CHECKED.
+- **Modelled Status**: The replay harness assigned a constant synthetic onset of 87.0 minutes (08:00 PST, 87 minutes after 06:33 ignition) across all 235 vehicles as an assumed town-wide overrun onset. Every abandoned-vehicle row in this report and repository documentation is strictly designated as a **modelled constant onset, not an observation**.
 
 ---
 
@@ -136,14 +139,14 @@
 ### What the System CAN Claim
 1. **Inference Time of an Untrained Architecture**: The PyTorch neural surrogate forward pass executes in 34.51 ms per $256 \times 256$ tile on Apple M1 GPU (`mps`), requiring 310.59 ms across 9 tiles for domain coverage; no fidelity claim is made (cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv), rows 2 and 3).
 2. **Interactive Evacuation Re-Planning**: The network router evaluates evacuation routes across all 200 origins in 2,115.74 ms (10.58 ms per origin), enabling interactive replanning within 30-minute operational cycles (cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv), row 1).
-3. **Burnover Avoidance via Directional Buffering (Agent B)**: Negative burnover margins at 60 m are 1 of 177 for static and 0 for all other methods; B traps 6 origins versus 0 for static; at 30 m B on A2-assim has median 35.9 versus 84.5 for static; no paired test or CI computed (NOT COMPUTED); inconclusive (cite [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv), rows 8, 13, 1, 6).
-4. **Burnover Timing Error in Physics Teacher**: At seed 42, 8 of the 10 burnovers on the three corridors never burn in the teacher and the other 2 arrive +157 min late (cite [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv), rows 1, 5, 9; Clark Rd burnovers $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$).
+3. **Burnover margins by method (inconclusive)**: Negative burnover margins at 60 m are 1 of 177 for static and 0 for all other methods; B traps 6 origins versus 0 for static; at 30 m B on A2-assim has median 35.9 versus 84.5 for static; at 30 m the B on A2-assim median 35.9 comes from n=13 origins, static median 84.5 from n=118; no paired test or CI computed (NOT COMPUTED); inconclusive (cite [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv), rows 8, 13, 1, 6).
+4. **Burnover Timing Error in Physics Teacher**: At seed 42, 8 of the 10 burnovers on the three corridors never burn in the teacher and the other 2 arrive with median +157 min over the 2 finite burnovers (Pentz/Hwy 70) (cite [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv), rows 1, 5, 9; Clark Rd burnovers $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$). Seed 42 is a low-area seed (5,491 ha, about the 5th percentile of the 20-seed arm c; cite [`reports/teacher_v2_camp_fire_20seeds.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/teacher_v2_camp_fire_20seeds.csv)). The ensemble burnover finite counts from reports/step2_timing_by_hazard_type.csv are: Clark Rd 1 of 6, Skyway 0 of 2, Pentz/Hwy 70 2 of 2. This is a teacher check against 10 burnovers.
 
 ### What the System CANNOT Claim
 1. **NO Safety Guarantees**: This software is an academic engineering demonstration. It does NOT certify safe evacuation routes and must never be used for real-time emergency navigation or life-safety decisions.
-2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -37.0 min versus -31.5 min for A0 static (cite [`reports/step2_truth_margin_vs_nist_hazards.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_truth_margin_vs_nist_hazards.csv), rows 5 and 2) because re-routing onto alternative roads did not bypass town-wide abandoned vehicles.
-3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone cannot predict road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (roadblocks and satellite perimeters) that share an underlying source document with the empirical truth hazards.
-4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a single smoke tile (85.5% burned) and cannot be claimed as validated surrogates.
+2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -37.0 min versus -31.5 min for A0 static (cite [`reports/step2_truth_margin_vs_nist_hazards.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_truth_margin_vs_nist_hazards.csv), rows 5 and 2); cause not tested.
+3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone: teacher field not validated against road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (observed detections and roadblocks) that share an underlying source document with the empirical truth hazards.
+4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a checkpoint from phase 3A trained 2 epochs on 66 smoke shards; the A3-reignite tile burned 85.5 percent and cannot be claimed as validated surrogates.
 
 ---
 
@@ -160,7 +163,7 @@
 9. **Route Redundancy**: Agents A and A2-pure produce identical routes in every comparative table.
 10. **Surrogate Domain Over-Burn & Architecture Constraints**: The Phase 4A surrogate output covered the whole domain (IoU 0.1942 equals observed area over domain area) and comes from an untrained model; the surrogate is single-ignition and the Camp Fire ignition lies outside its tile; Phase 4B's A3-reignite burned 85.5 percent of its tile.
 11. **No Held-Out Teacher Test**: No held-out teacher fire test was conducted.
-12. **No Trained Surrogate Result**: No trained surrogate result is claimed unless a Kaggle or local checkpoint is reported in an appendix.
+12. **No Trained Surrogate Result**: No trained surrogate result is reported in this version.
 13. **Retracted Figures**: Phase 4B's narrative 24.1 ms forward pass and 56.4x speedup are retracted as unmeasured estimates. The measured numbers are 34.51 ms per tile (39.39x tile speedup; cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv)) and 310.59 ms domain coverage (8.85x domain speedup; cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv)).
 
 ---
