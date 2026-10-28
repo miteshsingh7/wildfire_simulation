@@ -410,12 +410,22 @@ tab_map, tab_origin, tab_zones, tab_perf = st.tabs([
 with tab_map:
     col_map, col_legend = st.columns([4, 1])
 
+    # Basemap configuration:
+    # "light" requests Carto Positron vector tiles via HTTPS, requiring network access.
+    # When running 100% offline, map_style=None renders all local layers on an offline canvas.
+    online_basemap = st.sidebar.checkbox(
+        "Load Online Basemap (Carto)",
+        value=False,
+        help="Requires active internet access to stream Carto Positron tiles. Unchecked operates 100% offline.",
+    )
+    selected_map_style = "light" if online_basemap else None
+
     with col_map:
         st.pydeck_chart(
             pdk.Deck(
                 layers=layers,
                 initial_view_state=view_state,
-                map_style="light",
+                map_style=selected_map_style,
                 tooltip={
                     "html": "<b>{hazard_type}</b><br>Onset: +{onset_min} min<br>ID: {hazard_id}",
                     "style": {"color": "white"},

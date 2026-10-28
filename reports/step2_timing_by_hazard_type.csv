@@ -1,0 +1,13 @@
+corridor,hazard_type,n_unique,s42_n_finite,s42_med_signed_diff_min,s42_share_never_burn,s42_share_teacher_later,ens_n_finite,ens_med_signed_diff_min,ens_share_never_burn,ens_share_teacher_later
+Clark Rd,burnover,6,0,N/A,100.0%,0.0%,1,343.0,83.3%,16.7%
+Clark Rd,roadblock,33,0,N/A,100.0%,0.0%,1,270.0,97.0%,3.0%
+Clark Rd,abandoned_vehicle,105,0,N/A,100.0%,0.0%,2,463.0,98.1%,1.9%
+Clark Rd,total,144,0,N/A,100.0%,0.0%,4,403.0,97.2%,2.8%
+Skyway,burnover,2,0,N/A,100.0%,0.0%,0,N/A,100.0%,0.0%
+Skyway,roadblock,18,0,N/A,100.0%,0.0%,0,N/A,100.0%,0.0%
+Skyway,abandoned_vehicle,22,0,N/A,100.0%,0.0%,0,N/A,100.0%,0.0%
+Skyway,total,42,0,N/A,100.0%,0.0%,0,N/A,100.0%,0.0%
+Pentz/Hwy 70,burnover,2,2,157.0,0.0%,100.0%,2,266.0,0.0%,100.0%
+Pentz/Hwy 70,roadblock,19,2,137.5,89.5%,10.5%,4,163.5,78.9%,21.1%
+Pentz/Hwy 70,abandoned_vehicle,55,19,249.0,65.5%,34.5%,20,283.0,63.6%,36.4%
+Pentz/Hwy 70,total,76,23,247.0,69.7%,30.3%,26,283.0,65.8%,34.2%

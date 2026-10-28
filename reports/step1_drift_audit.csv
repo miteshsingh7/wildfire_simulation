@@ -1,7 +1,7 @@
 metric,3c_canonical,4b_flawed,impact
 Train Fires,"['kincade', 'glass', 'zogg', 'creek']","['bobcat', 'creek', 'glass', 'kincade']",Accidental substitution of val fire bobcat for train fire zogg
-Train Samples (out of 62),42,40,2 sample difference
-B0 Constant,0.096417,0.091099,Shifted base rate
+Train Samples (out of 62),34,34,Identical count (zogg 10 samples swapped for bobcat 10 samples)
+B0 Constant,0.096417,0.091099,Shifted base rate due to swapped sample content
 B1 table_burn_prob SHA256,08674aa59587461e...,963e33bf6d5a1532...,Lookup table mismatch
 B0 ALL Bin 0 Brier Score,0.00978,0.00879,Evaluation drift restored to 0.00978
 B1 ALL Bin 4 IoU,0.2433,0.0180,Evaluation drift restored to 0.2433

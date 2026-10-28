@@ -160,10 +160,13 @@ PYTHONPATH=src:scripts .venv/bin/python scripts/test_demo_headless.py
 ```
 
 ### 2. Full Evacuation Replay Simulation & Empirical Hazard Audit
-Runs the 7 comparative agent configurations against 436 NIST empirical truth hazards (burnovers, roadblocks, abandoned vehicles):
+Runs the comparative agent configurations against 436 NIST empirical truth hazards (burnovers, roadblocks, abandoned vehicles) and computes timing error across unique corridor hazards:
 ```bash
-# Run Step 2 (truth margins) and Step 3 (corridor timing error audit)
-PYTHONPATH=src:scripts .venv/bin/python scripts/step2_step3_margin_and_timing_audit.py
+# Run Step 1 (dataset sample counts breakdown per fire and split)
+PYTHONPATH=src:scripts .venv/bin/python scripts/step1_sample_counts.py
+
+# Run Step 2 (disaggregated hazard-type margins across 30m, 60m, 120m and unique corridor timing)
+PYTHONPATH=src:scripts .venv/bin/python scripts/step2_hazard_type_margin_and_timing.py
 ```
 
 ### 3. Surrogate Training & Verification
@@ -208,6 +211,27 @@ python scripts/package_for_kaggle.py
 | **Replay Routes JSON** | `out/demo/routes.json` | `577dc110d9359e19890bc894c77c6870020a1740922e96dd8319f61b0c007137` | Replay evacuation routes for 193 unique nodes |
 | **Demo Metadata** | `out/demo/metadata.json` | `1115bbf0cb49a4635848bb247a32bf8814ec9f0e1a1796191b9fe35860e6e768` | Center lon/lat and zoom settings |
 
+| **Sample Counts CSV** | `reports/step1_sample_counts.csv` | - | Shard sample count audit across fires and splits |
+| **Hazard Margins CSV** | `reports/step2_hazard_type_margins.csv` | - | Margin (ii) sensitivity (30m, 60m, 120m) by hazard type |
+| **Timing Error CSV** | `reports/step2_timing_by_hazard_type.csv` | - | Unique hazard timing per corridor and type |
+| **Latency Summary CSV** | `reports/step4_latency_summary.csv` | - | Replan, surrogate, and physics runtimes |
+
+---
+
+## Claims & Evidence
+
+### What the System CAN Claim
+1. **Low-Latency Tile-Level Fire Emulation**: The PyTorch neural surrogate emulates a 12-hour fire arrival horizon on a $256 \times 256$ tile in 34.51 ms on Apple M1 GPU (`mps`), achieving a **39.39x speedup** over the cellular physics simulator (1,359.3 ms). At the full 9-tile domain level, it achieves an **8.85x speedup** (310.59 ms vs 2,747.21 ms). Cites `reports/step4_latency_summary.csv`.
+2. **Interactive Evacuation Re-Planning**: The network router evaluates evacuation routes across all 200 origins in 2,115.74 ms (10.58 ms per origin), enabling interactive replanning within 30-minute operational cycles. Cites `reports/step4_latency_summary.csv`.
+3. **Burnover Avoidance via Directional Buffering (Agent B)**: Incorporating a 120-degree downwind buffer and ember-reach risk cone increases median safety margins against direct flame burnovers from +82.5 min (A0 static) to +127.0 min (B on A2-assim) at 60 m radius, reducing affected origins from 177/200 to 102/200. Cites `reports/step2_hazard_type_margins.csv`.
+4. **Empirical Measurement of Simulator Under-Burn**: Rigorous benchmarking reveals that Teacher v2 without assimilation never burns 100.0% of empirical hazards on Skyway and 97.2% on Clark Rd, and lags Pentz Rd arrivals by +163.5 min to +283.0 min. Cites `reports/step2_timing_by_hazard_type.csv`.
+
+### What the System CANNOT Claim
+1. **NO Safety Guarantees**: This software is an academic engineering demonstration. It does NOT certify safe evacuation routes and must never be used for real-time emergency navigation or life-safety decisions.
+2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -34.1 min (vs -28.0 min for A0 static) because re-routing onto alternative roads did not bypass town-wide abandoned vehicles. Cites `reports/step2_hazard_type_margins.csv`.
+3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone cannot predict road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (roadblocks and satellite perimeters) that share an underlying source document with the empirical truth hazards.
+4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a single smoke tile (85.5% burned) and cannot be claimed as validated surrogates.
+
 ---
 
 ## Model Limitations & Qualitative Clearance Notice
@@ -216,5 +240,15 @@ python scripts/package_for_kaggle.py
 > All evacuation clearance times, link queuing delays, and corridor congestion metrics produced by `wf052.routing` are **qualitative planning assessments only**.
 > 
 > The macroscopic time-sliced assignment engine employs volume-delay functions (BPR) and link point-queue bottleneck formulations to evaluate relative scenario sensitivities (e.g. contraflow benefits, corridor capacity degradations, and safety margin thresholds). These outputs are intended for risk comparison and decision exploration, and must **not** be construed as certified microscopic operational traffic forecasts or guarantees of empirical evacuation timing. Micro-scale dynamics—including vehicle collisions, smoke-induced visibility reductions, abandoned vehicle blockages, and manual traffic direction—require dedicated agent-based microscopic traffic simulation.
+
+### Specific Limitations
+1. **HRRR Reanalysis vs Real-Time Forecast**: Atmospheric wind inputs use post-event HRRR reanalysis data rather than noisy real-time operational weather forecasts.
+2. **NIST Reconstructed Timestamps**: Empirical hazard onset times (roadblocks, burnovers, abandoned vehicles) are reconstructed based on NIST TN 2252 supplementary records with non-zero timestamp uncertainties ($\pm 15$ to $30$ minutes).
+3. **K=3 Corridor Bottleneck Clusters**: The road graph aggregates destination exits into 3 major corridor groups (Skyway, Clark Rd, Pentz/Hwy 70). Complex local off-corridor bypasses are not fully represented.
+4. **Teacher Physics Under-Burn**: The uncalibrated Rothermel/ember cellular automaton systematically under-predicts downwind spotting under extreme fire weather on steep terrain.
+5. **Development-Only Case Domain**: The Camp Fire (2018) is strictly a development scenario and is never included in surrogate training data to protect benchmark independence.
+6. **Shared Provenance in Causal Assimilation**: Causal observation assimilation ingests observed perimeters and roadblocks derived from the same NIST post-incident reconstruction as the evaluation hazards.
+7. **Provider B Risk Cone Heuristic**: Agent B utilizes a geometric directional cone and distance heuristic rather than an integrated microscopic ember trajectory simulator.
+8. **Retracted Figures**: Phase 4B's narrative 24.1 ms forward pass and 56.4x speedup are retracted as unmeasured estimates. The measured numbers are 34.51 ms per tile (39.39x tile speedup) and 310.59 ms domain coverage (8.85x domain speedup).
 
 
