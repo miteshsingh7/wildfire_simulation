@@ -54,13 +54,23 @@ def test_demo_app_headless() -> None:
     orig_box = selectboxes[0]
     print(f"Assertion PASS: Origin selectbox found: '{orig_box.label}' ({len(orig_box.options)} options)")
 
-    # 5. Verify Route Comparison Metrics / Columns
+    # 5. Verify Re-plan Button widget
+    buttons = at.button
+    assert len(buttons) >= 1, "Expected at least 1 button (Re-plan button)"
+    replan_btn = buttons[0]
+    print(f"Assertion PASS: Re-plan button found: '{replan_btn.label}' (key={replan_btn.key})")
+    # Click button and verify clean run
+    replan_btn.click().run()
+    assert not at.exception, "Exception encountered after clicking Re-plan button!"
+    print("Assertion PASS: Re-plan button clicked successfully without exceptions.")
+
+    # 6. Verify Route Comparison Metrics / Columns
     metrics = at.metric
     print(f"Assertion PASS: Rendered {len(metrics)} st.metric widgets (Safety Margins for compared methods).")
     for m in metrics[:4]:
         print(f"  Metric: label='{m.label}', value='{m.value}'")
 
-    # 6. Verify PyDeck deck / map element or container
+    # 7. Verify PyDeck deck / map element or container
     # Streamlit AppTest exposes at.info, at.warning, at.success, at.dataframe, at.tabs
     tabs = at.tabs
     print(f"Assertion PASS: Tabs rendered ({len(tabs)} tabs): {[t.label for t in tabs]}")

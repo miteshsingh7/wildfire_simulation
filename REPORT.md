@@ -1,48 +1,42 @@
-# Phase 4D Final Verification & Empirical Hazard Analysis Report
+# Phase 4E Final Claims Fix and Freeze Report
 
 **Repository**: `wf052` (Wildfire Evacuation Replay & Surrogate Modeling System)  
 **Date**: October 28, 2026  
-**Branch**: `integration/4d`  
+**Branch**: `integration/4e`  
 **Execution Environment**: macOS (Darwin 24.4.0, Apple M1, `mps` device)  
 **Weight Status**: `STAND-IN WEIGHTS` via `CKPT=checkpoints/best.pt` (Phase 3A smoke checkpoint) / Dry run evaluated via `checkpoints/kaggle_today_dry/best.pt`  
 **Case Domain**: Camp Fire (2018) is an unseen **DEVELOPMENT** case, strictly excluded from all surrogate training and tuning pipelines. Zero safety claims.
 
 ---
 
-## 1. Executive Summary
+## 1. Status Overview
 
-Phase 4D refines the empirical hazard analysis, closes sample count audits, characterizes hazard types independently, assesses demo offline dependencies, and establishes verified claims backed strictly by execution logs:
-
-1. **Sample Count Audit (Step 1)**:  
-   Resolved the Phase 4C sample count discrepancy. The shard `data/shards_kaggle_today_dry/shard_000.npz` contains exactly 62 samples across 7 fires: 34 training samples (`kincade`: 8, `glass`: 8, `zogg`: 10, `creek`: 8), 10 validation samples (`bobcat`: 10), and 18 testing samples (`caldor`: 8, `tamarack`: 10). The numbers 42 and 40 in Phase 4C's drift audit were a clerical typo; both canonical and flawed splits contained exactly 34 training samples because `zogg` and `bobcat` each contribute 10 samples. Documented in [`reports/step1_sample_counts.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step1_sample_counts.csv) and [`reports/step1_drift_audit.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step1_drift_audit.csv).
-
-2. **Disaggregated Hazard-Type Analysis (Step 2)**:  
-   Evaluated true safety margins without simulation rasters under a nearest-route-edge assignment (no cross-product over all edges), with margin defined as $t_{\text{onset}} - t_{\text{entry}}$ across matching radii (30 m, 60 m, 120 m):
-   - **Burnovers (23 incidents, direct flame contact)**: All dynamic routing agents achieve zero negative margins (0/200), and static routing has only 1 negative margin (1/177 affected). Median margins are positive across all methods (+81.7 min to +127.0 min at 60 m). Agent B achieves the fewest affected origins (102/200 vs 177/200 for static) and highest median margin (+127.0 min).
-   - **Roadblocks (178 records, traffic/utility closures)**: Dynamic agents achieve zero negative margins (0/200), whereas static routing experiences 84 negative margins (84/193 affected).
-   - **Abandoned Vehicles (235 records, gridlock onset at 87.0 min)**: Prevalent along all exit corridors, producing negative margins for the vast majority of affected vehicles across all agents (135 to 168 negatives). This confirms that Phase 4C's overall negative margin counts were identical to and dominated by abandoned vehicle encounters. Documented in [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv).
-
-3. **Unique Hazard Corridor Timing Breakdown (Step 2d)**:  
-   Deduped by unique `hazard_id` per corridor, Teacher v2 physics simulation completely misses the Skyway corridor (100.0% never-burn across all 42 unique hazards under both Seed 42 and the 5-seed ensemble) and Clark Rd (100.0% never-burn under Seed 42, 97.2% under ensemble). On Pentz Rd / Hwy 70, when fire does arrive, simulated arrivals lag empirical truth by a median of +137.5 min to +249.0 min (Seed 42) and +163.5 min to +283.0 min (ensemble). Documented in [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv).
-
-4. **Latency Retractions & Dual Speedup Reporting (Step 3 & 4)**:  
-   - Phase 4B's narrative 24.1 ms inference latency and 56.4x speedup are formally **RETRACTED**.
-   - **Tile-Level Speedup**: 39.39x (Teacher v2 256x256 tile latency of 1,359.3 ms vs surrogate forward pass of 34.51 ms).
-   - **Domain-Level Speedup**: 8.85x (Teacher v2 full 564x562 domain latency of 2,747.21 ms vs surrogate 9-tile domain coverage of 310.59 ms). Documented in [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv).
-
-5. **Demo Basemap Offline Verification (Step 4)**:  
-   The Streamlit demo (`app/demo.py`) previously requested remote Carto Positron vector tiles via Deck.gl (`map_style="light"`), which requires an internet connection. To ensure 100% offline operation, `map_style=None` is now set by default, rendering all simulation layers on a local canvas with an optional online basemap toggle. Headless verification passes with 0 unhandled exceptions.
+- **Physics Teacher (Contact + Embers)**: Done with caveats (calibrated contact plus ember model; under-burns Camp Fire by about 2x, over-burns training fires; cite `reports/step6_ember_ablation_summary.csv`, row 4).
+- **Surrogate Neural Architecture (WindConditionedUNet)**: Done (4,094,852 parameters, quantile heads $q_{10}/q_{50}/q_{90}$ + burn probability, FiLM wind conditioning).
+- **Surrogate Shard Generation & Sampler**: Done (sampler stall resolved in Phase 2I; dry run shard with 62 samples across 7 fires; cite `reports/step1_sample_counts.csv`).
+- **Base-rate Bias Init & Evaluation Module**: Done (base-rate init to train mean logit, per-bin quantile MAE/Brier/IoU metrics, canonical splits enforced; cite `reports/kaggle_today_dry/test_eval.csv`).
+- **Surrogate GPU Training on Full Dataset**: Not done (Kaggle notebook generated and verified; full multi-epoch GPU training run pending external Kaggle execution).
+- **Causal Replay Harness (Camp Fire Development Case)**: Done with caveats (7 comparative agents evaluated; Camp Fire is strictly unseen development case; stand-in weights used for A3).
+- **NIST Empirical Hazard Safety Margins (Burnovers, Roadblocks, Abandoned Vehicles)**: Done with caveats (burnovers and roadblocks have empirical timestamps; abandoned vehicles have modelled constant onset at 87.0 min set in `src/wf052/replay/harness.py` line 133 as a harness assumption, not an observation).
+- **Hazard Corridor Timing Error Analysis**: Done (deduped by unique hazard ID; Clark Rd $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$ for burnovers; cite `reports/step2_timing_by_hazard_type.csv`).
+- **Interactive Streamlit Replay Demo**: Done with caveats (offline map canvas with optional Carto basemap; zero network requests in a live browser is NOT VERIFIED).
 
 ---
 
-## 2. Detailed Methodology & Results
+## 2. Abandoned-Vehicle Onset Provenance
 
-### Step 1: Sample Counts Breakdown per Fire and Split
+- **Code Location**: [`src/wf052/replay/harness.py`](file:///Users/miteshsingh/Documents/projects/wf052/src/wf052/replay/harness.py), line 133:
+  ```python
+  onset_elapsed_min=87.0,  # 08:00 PST town-wide overrun onset
+  ```
+- **Provenance Status**: This is a **harness assumption**, NOT an observed timestamp from NIST. In NIST TN 2252 supplementary Table H-2, abandoned vehicles were inventoried post-fire (location, street, lane, whether burned), but individual vehicle abandonment timestamps were not recorded. The replay harness assigned a constant synthetic onset of 87.0 minutes (08:00 PST, 87 minutes after 06:33 ignition) across all 235 vehicles as an assumed town-wide overrun onset. Every abandoned-vehicle row in this report and repository documentation is strictly designated as a **modelled constant onset, not an observation**.
 
-- **Script**: [`scripts/step1_sample_counts.py`](file:///Users/miteshsingh/Documents/projects/wf052/scripts/step1_sample_counts.py)  
-- **Command**: `PYTHONPATH=src:scripts .venv/bin/python scripts/step1_sample_counts.py`  
-- **Source Shard**: `data/shards_kaggle_today_dry/shard_000.npz` (SHA-256: `acbf4a902098204f9ab0f8b5ec366e39ab658b42a480297f1a6f9c5d2be017aa`)  
-- **Output CSV**: [`reports/step1_sample_counts.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step1_sample_counts.csv) and [`reports/step1_drift_audit.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step1_drift_audit.csv)  
+---
+
+## 3. Disaggregated Hazard Types Analysis
+
+### Sample Counts per Fire and Split
+*Source: [`reports/step1_sample_counts.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step1_sample_counts.csv)*
 
 | Fire Name | Dataset Split | Sample Count | Maximum Allowed (2 / bin) | Bins Represented |
 | :--- | :--- | :--- | :--- | :--- |
@@ -55,33 +49,12 @@ Phase 4D refines the empirical hazard analysis, closes sample count audits, char
 | **zogg** | train | 10 | 10 | Bins 1, 2, 3, 4 |
 | **TOTAL** | - | **62** | - | - |
 
-#### Summary by Dataset Split
-- **TRAIN** (`kincade`, `glass`, `zogg`, `creek`): 8 + 8 + 10 + 8 = **34 samples**  
-- **VAL** (`bobcat`): **10 samples**  
-- **TEST** (`caldor`, `tamarack`): 8 + 10 = **18 samples**  
-- **TOTAL**: 34 + 10 + 18 = **62 samples**  
+- **TRAIN** (`kincade`, `glass`, `zogg`, `creek`): $8 + 8 + 10 + 8 = \mathbf{34\text{ samples}}$ (cite `reports/step1_sample_counts.csv`, rows 3, 4, 5, 7).
+- **VAL** (`bobcat`): **10 samples** (cite `reports/step1_sample_counts.csv`, row 1).
+- **TEST** (`caldor`, `tamarack`): $8 + 10 = \mathbf{18\text{ samples}}$ (cite `reports/step1_sample_counts.csv`, rows 2, 6).
+- **TOTAL**: $34 + 10 + 18 = \mathbf{62\text{ samples}}$.
 
-#### Clarification of Phase 4C Report Mismatch
-In the Phase 4C drift audit table, training samples were incorrectly transcribed as 42 (canonical) vs 40 (flawed). The script `scripts/step1_evaluation_drift_audit.py` measured exactly 34 training samples in both runs. In the flawed 4B split (`['bobcat', 'creek', 'glass', 'kincade']`), validation fire `bobcat` (10 samples) replaced training fire `zogg` (10 samples). Because both fires have exactly 10 samples, the total training sample count remained at exactly 34 samples, while shifting sample content and causing baseline drift.
-
----
-
-### Step 2: Hazard Types Margin & Timing Analysis
-
-- **Script**: [`scripts/step2_hazard_type_margin_and_timing.py`](file:///Users/miteshsingh/Documents/projects/wf052/scripts/step2_hazard_type_margin_and_timing.py)  
-- **Command**: `PYTHONPATH=src:scripts .venv/bin/python scripts/step2_hazard_type_margin_and_timing.py`  
-- **Output CSVs**: [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv) and [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv)  
-
-#### 2a. NIST Source Onset Definitions & Event Types
-- **Source Citation Status**: `NOT CHECKED` (original NIST TN 2135 / TN 2252 PDF reports are not open in the repository; extracted Parquet tables are open in `data/tiles/`).
-- **Burnovers (23 incidents)**: Onset time records the timestamp when active fire flames burned over vehicles, civilian evacuees, or emergency responders on roadways (e.g. Hoffman Road at 07:50–08:30 PST). **This is a direct fire-arrival event**.
-- **Roadblocks (178 records)**: Onset time records when law enforcement or emergency services established physical road closures or when downed utility lines obstructed travel (e.g. CA-70 closure at 07:29 PST, power lines down at 04:30 PST). This is an operational traffic restriction event, not flame arrival.
-- **Abandoned Vehicles (235 records)**: Post-fire survey inventoried vehicles left in traffic lanes across town. In the simulation harness, onset is modeled as a uniform town-wide corridor gridlock onset at 08:00 PST (87.0 min elapsed post-ignition). This is a traffic gridlock event (161 of 235 vehicles ultimately burned post-abandonment).
-
-#### 2b. Margin (ii) Formulation
-Hazards persist after onset. Margin is computed as $m = t_{\text{onset}} - t_{\text{entry}}$, where $t_{\text{entry}}$ is the time the vehicle enters the nearest route edge. Each hazard is assigned strictly to its nearest route edge only ($e^* = \arg\min_{e \in r} \text{dist}(e, h)$), eliminating cross-product matching over multiple edges.
-
-#### PRIMARY TABLE: Burnover-Only Margins (23 Incidents)
+### PRIMARY TABLE: Burnover-Only Margins (23 Incidents)
 *Source: [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv)*
 
 | Radius | Method | Hazard Type | Affected Origins (out of 200) | Negative Margins | Median Margin (min) | P10 Margin (min) | Trapped (out of 200) |
@@ -108,7 +81,7 @@ Hazards persist after onset. Margin is computed as $m = t_{\text{onset}} - t_{\t
 | **120 m** | B on A2-assim | burnover | 102 / 200 | 0 / 102 | 127.0 | 79.6 | 6 / 200 |
 | **120 m** | B on A2-pure | burnover | 105 / 200 | 0 / 105 | 125.7 | 79.6 | 6 / 200 |
 
-#### SECONDARY TABLE: Roadblocks Margins (178 Records, Radius = 60 m)
+### SECONDARY TABLE: Roadblocks Margins (178 Records, Radius = 60 m)
 *Source: [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv)*
 
 | Method | Hazard Type | Affected Origins (out of 200) | Negative Margins | Median Margin (min) | P10 Margin (min) | Trapped (out of 200) |
@@ -121,22 +94,18 @@ Hazards persist after onset. Margin is computed as $m = t_{\text{onset}} - t_{\t
 | **B on A2-assim** | roadblock | 121 / 200 | 0 / 121 | 62.0 | 19.8 | 6 / 200 |
 | **B on A2-pure** | roadblock | 124 / 200 | 0 / 124 | 59.4 | 19.7 | 6 / 200 |
 
-#### SECONDARY TABLE: Abandoned Vehicles Margins (235 Records, Radius = 60 m)
+### SECONDARY TABLE: Abandoned Vehicles Margins (235 Records, Modelled Constant Onset at 87.0 min, Not an Observation, Radius = 60 m)
 *Source: [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv)*
 
-| Method | Hazard Type | Affected Origins (out of 200) | Negative Margins | Median Margin (min) | P10 Margin (min) | Trapped (out of 200) |
+| Method | Hazard Type (Modelled Constant Onset) | Affected Origins (out of 200) | Negative Margins | Median Margin (min) | P10 Margin (min) | Trapped (out of 200) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **A0 static** | abandoned_vehicle | 186 / 200 | 168 / 186 | -30.9 | -57.2 | 0 / 200 |
-| **A1 reactive** | abandoned_vehicle | 142 / 200 | 137 / 142 | -36.5 | -57.4 | 25 / 200 |
-| **A (teacher_v1)** | abandoned_vehicle | 181 / 200 | 163 / 181 | -35.7 | -57.5 | 1 / 200 |
-| **A2-assim** | abandoned_vehicle | 160 / 200 | 155 / 160 | -39.6 | -57.8 | 2 / 200 |
-| **A2-pure** | abandoned_vehicle | 181 / 200 | 163 / 181 | -35.7 | -57.5 | 1 / 200 |
-| **B on A2-assim** | abandoned_vehicle | 137 / 200 | 135 / 137 | -17.7 | -63.4 | 6 / 200 |
-| **B on A2-pure** | abandoned_vehicle | 140 / 200 | 138 / 140 | -22.6 | -63.1 | 6 / 200 |
-
-#### 2c. Metric Equivalence: Negative Margins vs Section 7.3 Abandoned Vehicle Misses
-The negative margin counts in Phase 4C (168 for static, 163 for A, 155 for A2-assim, 135 for B on A2-assim) equal the abandoned vehicle miss counts from Section 7.3 (`reports/step5b_replay_metrics_sec73.csv`) exactly.  
-**State of equivalence**: The two metrics represent the identical physical computation. In Section 7.3, a hazard miss occurs when $t_{\text{traversal}} \ge t_{\text{onset}}$ within spatial radius 120 m, which is mathematically identical to margin $t_{\text{onset}} - t_{\text{traversal}} \le 0$. Because the 235 abandoned vehicles have a uniform onset time of 87.0 min (08:00 PST) and line every major corridor, vehicles traversing these roads after 08:00 PST encounter negative margins. As shown in the tables above, burnovers produce only 1 negative margin for static and 0 for dynamic agents, meaning that overall negative margin counts are completely determined by abandoned vehicles.
+| **A0 static** | abandoned_vehicle (modelled constant onset) | 186 / 200 | 168 / 186 | -30.9 | -57.2 | 0 / 200 |
+| **A1 reactive** | abandoned_vehicle (modelled constant onset) | 142 / 200 | 137 / 142 | -36.5 | -57.4 | 25 / 200 |
+| **A (teacher_v1)** | abandoned_vehicle (modelled constant onset) | 181 / 200 | 163 / 181 | -35.7 | -57.5 | 1 / 200 |
+| **A2-assim** | abandoned_vehicle (modelled constant onset) | 160 / 200 | 155 / 160 | -39.6 | -57.8 | 2 / 200 |
+| **A2-pure** | abandoned_vehicle (modelled constant onset) | 181 / 200 | 163 / 181 | -35.7 | -57.5 | 1 / 200 |
+| **B on A2-assim** | abandoned_vehicle (modelled constant onset) | 137 / 200 | 135 / 137 | -17.7 | -63.4 | 6 / 200 |
+| **B on A2-pure** | abandoned_vehicle (modelled constant onset) | 140 / 200 | 138 / 140 | -22.6 | -63.1 | 6 / 200 |
 
 ---
 
@@ -149,81 +118,54 @@ The negative margin counts in Phase 4C (168 for static, 163 for A, 155 for A2-as
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1** | Clark Rd | burnover | 6 | 0 | N/A | 100.0% | 0.0% | 1 | +343.0 | 83.3% | 16.7% |
 | **2** | Clark Rd | roadblock | 33 | 0 | N/A | 100.0% | 0.0% | 1 | +270.0 | 97.0% | 3.0% |
-| **3** | Clark Rd | abandoned_vehicle | 105 | 0 | N/A | 100.0% | 0.0% | 2 | +463.0 | 98.1% | 1.9% |
-| **4** | Clark Rd | total | 144 | 0 | N/A | 100.0% | 0.0% | 4 | +403.0 | 97.2% | 2.8% |
+| **3** | Clark Rd | abandoned_vehicle (modelled) | 105 | 0 | N/A | 100.0% | 0.0% | 2 | +463.0 | 98.1% | 1.9% |
+| **4** | Clark Rd | total (modelled) | 144 | 0 | N/A | 100.0% | 0.0% | 4 | +403.0 | 97.2% | 2.8% |
 | **5** | Skyway | burnover | 2 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
 | **6** | Skyway | roadblock | 18 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
-| **7** | Skyway | abandoned_vehicle | 22 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
-| **8** | Skyway | total | 42 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
+| **7** | Skyway | abandoned_vehicle (modelled) | 22 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
+| **8** | Skyway | total (modelled) | 42 | 0 | N/A | 100.0% | 0.0% | 0 | N/A | 100.0% | 0.0% |
 | **9** | Pentz/Hwy 70 | burnover | 2 | 2 | +157.0 | 0.0% | 100.0% | 2 | +266.0 | 0.0% | 100.0% |
 | **10** | Pentz/Hwy 70 | roadblock | 19 | 2 | +137.5 | 89.5% | 10.5% | 4 | +163.5 | 78.9% | 21.1% |
-| **11** | Pentz/Hwy 70 | abandoned_vehicle | 55 | 19 | +249.0 | 65.5% | 34.5% | 20 | +283.0 | 63.6% | 36.4% |
-| **12** | Pentz/Hwy 70 | total | 76 | 23 | +247.0 | 69.7% | 30.3% | 26 | +283.0 | 65.8% | 34.2% |
-
-#### Verified Conclusions Citing Specific Table Rows
-1. **Skyway Total Under-Burn (Rows 5–8)**: Teacher v2 exhibits a 100.0% never-burn rate across all 42 unique hazards on the Skyway corridor under both Seed 42 and the 5-seed ensemble median (rows 5, 6, 7, and 8).
-2. **Clark Road Under-Burn and Extreme Delays (Rows 1–4)**: Under Seed 42, 0 of 144 unique hazards on Clark Rd burn (100.0% never-burn, row 4). Under the ensemble median, 97.2% never burn; for the 4 hazards that do burn, Teacher v2 arrives +403.0 minutes later than empirical onset (row 4), including +343.0 min for burnovers (row 1), +270.0 min for roadblocks (row 2), and +463.0 min for abandoned vehicles (row 3).
-3. **Pentz/Hwy 70 Systematic Fire Lags (Rows 9–12)**: On Pentz/Hwy 70, where the fire simulator does simulate flame propagation across 23 hazards (Seed 42) and 26 hazards (ensemble), arrivals lag empirical onset by a median of +247.0 min (Seed 42) and +283.0 min (ensemble) (row 12). Specifically, simulated burnover arrivals lag empirical burnovers by +157.0 min under Seed 42 and +266.0 min under the ensemble median (row 9).
+| **11** | Pentz/Hwy 70 | abandoned_vehicle (modelled) | 55 | 19 | +249.0 | 65.5% | 34.5% | 20 | +283.0 | 63.6% | 36.4% |
+| **12** | Pentz/Hwy 70 | total (modelled) | 76 | 23 | +247.0 | 69.7% | 30.3% | 26 | +283.0 | 65.8% | 34.2% |
 
 ---
 
-### Step 3: Latency Benchmarks & Speedup Reporting
-
-- **Source CSV**: [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv)  
-- **Retraction Notice**: The Phase 4B figures of 24.1 ms forward pass and 56.4x speedup were unmeasured narrative estimates and are formally **RETRACTED**.
-
-| Benchmark Level | Teacher v2 Runtime (Physics) | Surrogate Runtime (UNet) | Speedup Factor | Hardware / Device |
-| :--- | :--- | :--- | :--- | :--- |
-| **Tile-Level** ($256 \times 256$ tile, 12 h horizon) | 1,359.3 ms ($\pm$ 214.2 ms) | 34.51 ms (p50: 34.43 ms) | **39.39x Speedup** | Apple M1 MPS |
-| **Domain-Level** ($564 \times 562$ extent, 9 tiles) | 2,747.21 ms ($\pm$ 460.71 ms) | 310.59 ms ($9 \times 34.51\text{ ms}$) | **8.85x Speedup** | Apple M1 MPS |
-
-*Notes on Surrogate Weights*: All surrogate-driven rows in earlier phases (e.g. Phase 4A Agent A3 rows, Phase 4B Agent A3-reignite rows) were evaluated using `STAND-IN WEIGHTS` from the Phase 3A smoke checkpoint (`checkpoints/best.pt`). This checkpoint was trained on an untrained, single over-burned 85.5% burned tile and does not represent a production surrogate model.
-
----
-
-### Step 4: Demo Offline Integrity & Basemap Configuration
-
-- **File**: [`app/demo.py`](file:///Users/miteshsingh/Documents/projects/wf052/app/demo.py)  
-- **Headless Test**: [`scripts/test_demo_headless.py`](file:///Users/miteshsingh/Documents/projects/wf052/scripts/test_demo_headless.py)  
-
-1. **Basemap Network Requirement**:  
-   Streamlit / PyDeck renders basemap tiles via Mapbox/Carto vector tile APIs (`map_style="light"`). Loading these background basemap tiles requires active network connectivity.
-2. **Offline Implementation**:  
-   In `app/demo.py`, `map_style=None` is set by default, allowing Deck.gl to render the complete vector layers (road network, evacuation routes, fire isochrones, hazards) on an offline local canvas with zero remote network requests. An optional checkbox in the sidebar (`Load Online Basemap (Carto)`) allows streaming Carto Positron tiles when online.
-3. **Headless Verification**:  
-   Ran `PYTHONPATH=src:scripts .venv/bin/python scripts/test_demo_headless.py`. Passed with 0 unhandled exceptions.
-
----
-
-## 3. Claims & Evidence
+## 4. Claims & Evidence
 
 ### What the System CAN Claim
-1. **Low-Latency Tile-Level Fire Emulation**: The PyTorch neural surrogate emulates a 12-hour fire arrival horizon on a $256 \times 256$ tile in 34.51 ms on Apple M1 GPU (`mps`), achieving a **39.39x speedup** over the cellular physics simulator (1,359.3 ms). At the full 9-tile domain level, it achieves an **8.85x speedup** (310.59 ms vs 2,747.21 ms). Cites [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv).
-2. **Interactive Evacuation Re-Planning**: The network router evaluates evacuation routes across all 200 origins in 2,115.74 ms (10.58 ms per origin), enabling interactive replanning within 30-minute operational cycles. Cites [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv).
-3. **Burnover Avoidance via Directional Buffering (Agent B)**: Incorporating a 120-degree downwind buffer and ember-reach risk cone increases median safety margins against direct flame burnovers from +82.5 min (A0 static) to +127.0 min (B on A2-assim) at 60 m radius, reducing affected origins from 177/200 to 102/200. Cites [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv).
-4. **Empirical Measurement of Simulator Under-Burn**: Rigorous benchmarking reveals that Teacher v2 without assimilation never burns 100.0% of empirical hazards on Skyway and 97.2% on Clark Rd, and lags Pentz Rd arrivals by +163.5 min to +283.0 min. Cites [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv).
+1. **Inference Time of an Untrained Architecture**: The PyTorch neural surrogate forward pass executes in 34.51 ms per $256 \times 256$ tile on Apple M1 GPU (`mps`), requiring 310.59 ms across 9 tiles for domain coverage; no fidelity claim is made (cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv), rows 2 and 3).
+2. **Interactive Evacuation Re-Planning**: The network router evaluates evacuation routes across all 200 origins in 2,115.74 ms (10.58 ms per origin), enabling interactive replanning within 30-minute operational cycles (cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv), row 1).
+3. **Burnover Avoidance via Directional Buffering (Agent B)**: Negative burnover margins at 60 m are 1 of 177 for static and 0 for all other methods; B traps 6 origins versus 0 for static; at 30 m B on A2-assim has median 35.9 versus 84.5 for static; no paired test or CI computed (NOT COMPUTED); inconclusive (cite [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv), rows 8, 13, 1, 6).
+4. **Burnover Timing Error in Physics Teacher**: At seed 42, 8 of the 10 burnovers on the three corridors never burn in the teacher and the other 2 arrive +157 min late (cite [`reports/step2_timing_by_hazard_type.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_timing_by_hazard_type.csv), rows 1, 5, 9; Clark Rd burnovers $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$).
 
 ### What the System CANNOT Claim
 1. **NO Safety Guarantees**: This software is an academic engineering demonstration. It does NOT certify safe evacuation routes and must never be used for real-time emergency navigation or life-safety decisions.
-2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -34.1 min (vs -28.0 min for A0 static) because re-routing onto alternative roads did not bypass town-wide abandoned vehicles. Cites [`reports/step2_hazard_type_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_hazard_type_margins.csv).
+2. **NO Superiority of A2-assim in Overall Negative Margins**: A2-assim does NOT eliminate negative margins under town-wide corridor gridlock. When evaluated against all 436 NIST hazards, A2-assim exhibits a median truth margin of -37.0 min versus -31.5 min for A0 static (cite [`reports/step2_truth_margin_vs_nist_hazards.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step2_truth_margin_vs_nist_hazards.csv), rows 5 and 2) because re-routing onto alternative roads did not bypass town-wide abandoned vehicles.
 3. **NO Independent Real-Time Ground-Truth from Forward Simulation**: Teacher v2 physics forward simulation alone cannot predict road impassability on western exit corridors. Furthermore, causal observation assimilation ingests NIST empirical observations (roadblocks and satellite perimeters) that share an underlying source document with the empirical truth hazards.
 4. **NO Production Readiness from Stand-in Weights**: Checkpoints evaluated in Phase 4A and 4B utilized `STAND-IN WEIGHTS` from a single smoke tile (85.5% burned) and cannot be claimed as validated surrogates.
 
 ---
 
-## 4. Known Limitations
+## 5. Known Limitations
 
-1. **HRRR Reanalysis vs Real-Time Forecast**: Atmospheric wind inputs use post-event HRRR reanalysis data rather than noisy real-time operational weather forecasts.
-2. **NIST Reconstructed Timestamps**: Empirical hazard onset times (roadblocks, burnovers, abandoned vehicles) are reconstructed based on NIST TN 2252 supplementary records with non-zero timestamp uncertainties ($\pm 15$ to $30$ minutes).
-3. **K=3 Corridor Bottleneck Clusters**: The road graph aggregates destination exits into 3 major corridor groups (Skyway, Clark Rd, Pentz/Hwy 70). Complex local off-corridor bypasses are not fully represented.
-4. **Teacher Physics Under-Burn**: The uncalibrated Rothermel/ember cellular automaton systematically under-predicts downwind spotting under extreme fire weather on steep terrain.
+1. **HRRR Analysis vs Real-Time Forecast**: Atmospheric wind inputs use post-event HRRR analysis ($fxx=0$), not reanalysis or real-time operational weather forecasts.
+2. **NIST Reconstructed Timestamps**: Empirical hazard onset times (roadblocks, burnovers) are reconstructed based on NIST TN 2252 supplementary records. Abandoned vehicles have a modelled constant onset at 87.0 min (harness assumption, not an observation).
+3. **K=3 Corridor Bottleneck Clusters**: The road graph aggregates destination exits into 3 major corridor groups (Skyway, Clark Rd, Pentz/Hwy 70). Complex local off-corridor bypasses are not fully represented, and K=3 corridor clusters make bootstraps inconclusive.
+4. **Teacher Physics Calibration Drift**: The teacher is a calibrated contact plus ember model; it under-burns the Camp Fire by about 2x and over-burns most training fires (cite [`reports/step6_ember_ablation_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step6_ember_ablation_summary.csv), row 4: Mean Area Ratio 5.597 on training fires; [`reports/camp_fire_heldout_60m_areas.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/camp_fire_heldout_60m_areas.csv)).
 5. **Development-Only Case Domain**: The Camp Fire (2018) is strictly a development scenario and is never included in surrogate training data to protect benchmark independence.
 6. **Shared Provenance in Causal Assimilation**: Causal observation assimilation ingests observed perimeters and roadblocks derived from the same NIST post-incident reconstruction as the evaluation hazards.
 7. **Provider B Risk Cone Heuristic**: Agent B utilizes a geometric directional cone and distance heuristic rather than an integrated microscopic ember trajectory simulator.
+8. **Vehicles Finish Before Fire Arrives in Physics Simulation**: Evacuation vehicles complete travel before the simulated fire reaches Paradise (smallest positive predicted margin 149.8 min; cite [`reports/step5c_route_safety_margins.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step5c_route_safety_margins.csv)).
+9. **Route Redundancy**: Agents A and A2-pure produce identical routes in every comparative table.
+10. **Surrogate Domain Over-Burn & Architecture Constraints**: The Phase 4A surrogate output covered the whole domain (IoU 0.1942 equals observed area over domain area) and comes from an untrained model; the surrogate is single-ignition and the Camp Fire ignition lies outside its tile; Phase 4B's A3-reignite burned 85.5 percent of its tile.
+11. **No Held-Out Teacher Test**: No held-out teacher fire test was conducted.
+12. **No Trained Surrogate Result**: No trained surrogate result is claimed unless a Kaggle or local checkpoint is reported in an appendix.
+13. **Retracted Figures**: Phase 4B's narrative 24.1 ms forward pass and 56.4x speedup are retracted as unmeasured estimates. The measured numbers are 34.51 ms per tile (39.39x tile speedup; cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv)) and 310.59 ms domain coverage (8.85x domain speedup; cite [`reports/step4_latency_summary.csv`](file:///Users/miteshsingh/Documents/projects/wf052/reports/step4_latency_summary.csv)).
 
 ---
 
-## 5. Appendix: Provenance, Checksums & File Paths
+## 6. Appendix: Provenance, Checksums & File Paths
 
 | File / Artifact | Relative Path | SHA-256 Checksum | Purpose / Description |
 | :--- | :--- | :--- | :--- |

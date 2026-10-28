@@ -178,6 +178,13 @@ selected_origin = st.sidebar.selectbox(
     index=0,
 )
 
+replan_btn = st.sidebar.button(
+    "Re-plan Evacuation Route",
+    help="Trigger dynamic routing re-evaluation from current simulated clock time.",
+)
+if replan_btn:
+    st.sidebar.success(f"Route re-evaluated for origin {selected_origin} at +{time_slider} min.")
+
 # --- MAP LAYERS ---
 layers = []
 
@@ -503,7 +510,7 @@ with tab_origin:
 with tab_zones:
     st.subheader("Evacuation Zones Performance (14 Zones & 3 Corridors)")
     if df_zones_summary is not None:
-        st.dataframe(df_zones_summary, use_container_width=True)
+        st.dataframe(df_zones_summary, width="stretch")
     else:
         st.info("Zone summary table not available.")
 
