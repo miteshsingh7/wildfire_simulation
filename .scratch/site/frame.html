@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>frame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --strip: #1f1f23;
+    --bar: #3b3b3f;
+    --pill: #252529;
+    --edge: #303034;
+    --text: #e8e8ea;
+    --muted: #a8a8ad;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1440px; height: 900px; background: var(--strip); overflow: hidden; }
+  body { font-family: "Inter", -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; color: var(--text); position: relative; }
+
+  .strip { position: absolute; top: 0; left: 0; width: 1440px; height: 42px; background: var(--strip); }
+  .bar { position: absolute; top: 42px; left: 0; width: 1440px; height: 72px; background: var(--bar); }
+  .edge { position: absolute; top: 114px; left: 0; width: 1440px; height: 1px; background: var(--edge); }
+
+  .light { position: absolute; top: 14px; width: 13px; height: 13px; border-radius: 50%; }
+  .l-red { left: 14px; background: #ed4a47; }
+  .l-gray { left: 37px; background: #3d3d41; }
+  .l-green { left: 60px; background: #2ec046; }
+
+  .tab {
+    position: absolute; left: 77px; top: 5px; width: 242px; height: 37px;
+    background: var(--bar); border-radius: 9px 9px 0 0;
+    display: flex; align-items: center; padding: 0 12px 0 11px; gap: 8px;
+  }
+  .tab .globe { width: 15px; height: 15px; flex: none; }
+  .tab .title {
+    flex: 1; min-width: 0; font-size: 13px; font-weight: 400; color: var(--text); white-space: nowrap; overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%); mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+  }
+  .tab .x { width: 11px; height: 11px; flex: none; }
+  .plus { position: absolute; left: 331px; top: 12px; width: 16px; height: 16px; }
+  .chev { position: absolute; right: 12px; top: 14px; width: 13px; height: 13px; }
+
+  .nav { position: absolute; top: 55px; width: 20px; height: 20px; }
+  .pill {
+    position: absolute; left: 92px; top: 46px; width: 1040px; height: 32px; background: var(--pill); border-radius: 16px;
+    display: flex; align-items: center; padding-left: 14px; gap: 14px;
+  }
+  .pill .info { width: 14px; height: 14px; flex: none; }
+  .pill .url { font-size: 14.5px; color: var(--text); letter-spacing: 0.1px; }
+  .pill .sep { position: absolute; right: 52px; top: 8px; width: 1px; height: 16px; background: #5a5a5f; }
+  .pill .shield { position: absolute; right: 14px; top: 7px; width: 16px; height: 18px; }
+
+  .tools { position: absolute; top: 52px; display: flex; align-items: center; gap: 13px; left: 1148px; }
+  .tools svg { width: 20px; height: 20px; flex: none; }
+  .update {
+    position: absolute; right: 8px; top: 47px; height: 30px; padding: 0 9px 0 12px; border: 1px solid #c97d7d; border-radius: 9px;
+    display: flex; align-items: center; gap: 6px; font-size: 14px; color: #f0d6d6;
+  }
+
+  .bookmarks { position: absolute; top: 78px; left: 0; width: 1440px; height: 36px; }
+  .bookmarks .apps { position: absolute; left: 11px; top: 9px; width: 18px; height: 18px; }
+  .bookmarks .vsep { position: absolute; left: 41px; top: 9px; width: 1px; height: 19px; background: #5a5a5f; }
+  .bookmarks .allbm { position: absolute; right: 10px; top: 8px; display: flex; align-items: center; gap: 7px; font-size: 14px; color: var(--text); }
+  .bookmarks .allbm svg { width: 18px; height: 18px; }
+  .bookmarks .bsep { position: absolute; right: 150px; top: 9px; width: 1px; height: 19px; background: #5a5a5f; }
+
+  .page { position: absolute; top: 115px; left: 0; width: 1440px; height: 785px; background: #030e20; }
+  .page img { display: block; width: 1440px; height: 785px; }
+</style>
+</head>
+<body>
+  <div class="strip"></div>
+  <div class="bar"></div>
+  <div class="edge"></div>
+
+  <div class="light l-red"></div>
+  <div class="light l-gray"></div>
+  <div class="light l-green"></div>
+
+  <div class="tab">
+    <svg class="globe" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" fill="#9a9aa0"/><path d="M12 1a11 11 0 0 0 0 22M1 12h22M12 1c3.2 3 4.8 6.8 4.8 11S15.200 20 12 23M12 1C8.800 4 7.200 7.800 7.200 12S8.800 20 12 23" stroke="#3b3b3f" stroke-width="1.600"/></svg>
+    <span class="title" id="tabtitle">INCIDENT-052: Wildfire Spread Simulation &amp; Evacuation Routing</span>
+    <svg class="x" viewBox="0 0 12 12" fill="none" stroke="#e8e8ea" stroke-width="1.700" stroke-linecap="round"><path d="M1.500 1.500l9 9M10.500 1.500l-9 9"/></svg>
+  </div>
+  <svg class="plus" viewBox="0 0 16 16" fill="none" stroke="#c9c9ce" stroke-width="1.600" stroke-linecap="round"><path d="M8 2v12M2 8h12"/></svg>
+  <svg class="chev" viewBox="0 0 14 14" fill="none" stroke="#c9c9ce" stroke-width="1.700" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5l5 5 5-5"/></svg>
+
+  <svg class="nav" style="left:11px" viewBox="0 0 20 20" fill="none" stroke="#7a7a80" stroke-width="1.800" stroke-linecap="round" stroke-linejoin="round"><path d="M12.500 3.500l-6.500 6.500 6.500 6.500"/></svg>
+  <svg class="nav" style="left:39px" viewBox="0 0 20 20" fill="none" stroke="#7a7a80" stroke-width="1.800" stroke-linecap="round" stroke-linejoin="round"><path d="M7.500 3.500l6.500 6.500-6.500 6.500"/></svg>
+  <svg class="nav" style="left:66px" viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.800" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a6 6 0 1 1-2-4.500"/><path d="M16 3.500v3.500h-3.500"/></svg>
+
+  <div class="pill">
+    <svg class="info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7.500" fill="#e8e8ea"/><rect x="7.100" y="6.800" width="1.800" height="5" rx=".6" fill="#252529"/><circle cx="8" cy="4.600" r="1.100" fill="#252529"/></svg>
+    <span class="url">http://localhost:8000</span>
+    <span class="sep"></span>
+    <svg class="shield" viewBox="0 0 16 18"><path d="M8 1l6.500 2.600v5c0 4-2.800 6.600-6.500 8.400C4.300 15.200 1.500 12.600 1.500 8.600v-5z" fill="#ff5a2a"/><path d="M8 5.200l2.500 1-.7 3.200L8 11.600 6.200 9.400l-.7-3.200z" fill="#fff"/></svg>
+  </div>
+
+  <div class="tools">
+    <svg viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.500" stroke-linejoin="round"><path d="M8 3h2.500v1.600a1.400 1.400 0 1 0 2.800 0V3H16v3.500h-1.600a1.400 1.400 0 1 0 0 2.800H16V13h-3.500v-1.600a1.400 1.400 0 1 0-2.800 0V13H6.500V9.300H5a1.400 1.400 0 1 1 0-2.800h1.500V3z"/></svg>
+    <svg viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.600" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v10M6 9.500l4 4 4-4M4 16.500h12"/></svg>
+    <svg viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.600"><rect x="3" y="3.500" width="14" height="13" rx="2"/><path d="M12 3.500v13" /><rect x="12" y="3.500" width="5" height="13" fill="#e8e8ea" stroke="none"/></svg>
+    <svg viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.500" stroke-linejoin="round"><path d="M10 2.500l1.600 4.300 4.300 1.600-4.300 1.600L10 14.300 8.400 10 4.100 8.400l4.300-1.600z"/><path d="M15.500 13l.7 1.800 1.800.7-1.800.7-.7 1.800-.7-1.800-1.800-.7 1.800-.7z" fill="#e8e8ea" stroke="none"/></svg>
+    <svg viewBox="0 0 20 20" fill="none" stroke="#e8e8ea" stroke-width="1.500" stroke-linejoin="round"><path d="M10 2.500l6 2.300v4.800c0 3.400-2.400 5.600-6 7.200-3.600-1.600-6-3.800-6-7.200V4.800z"/><path d="M7 9.500l2.200 2.200L13 7.800" stroke-linecap="round"/></svg>
+  </div>
+  <div class="update">Update
+    <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="#f0d6d6" stroke-width="1.700" stroke-linecap="round"><path d="M2 2h16M2 7h16M2 12h16"/></svg>
+  </div>
+
+  <div class="bookmarks">
+    <svg class="apps" viewBox="0 0 18 18" fill="none" stroke="#e8e8ea" stroke-width="1.500"><rect x="1.500" y="1.500" width="6" height="6" rx="1.600"/><rect x="10.500" y="1.500" width="6" height="6" rx="1.600"/><rect x="1.500" y="10.500" width="6" height="6" rx="1.600"/><rect x="10.500" y="10.500" width="6" height="6" rx="1.600"/></svg>
+    <span class="vsep"></span>
+    <span class="bsep"></span>
+    <div class="allbm">
+      <svg viewBox="0 0 18 18" fill="none" stroke="#e8e8ea" stroke-width="1.500" stroke-linejoin="round"><path d="M1.500 4.500a1.500 1.500 0 0 1 1.500-1.500h3.600l1.800 2H15a1.500 1.500 0 0 1 1.500 1.500v7A1.500 1.500 0 0 1 15 15H3a1.500 1.500 0 0 1-1.500-1.500z"/></svg>
+      All Bookmarks
+    </div>
+  </div>
+
+  <div class="page"><img id="shot" alt="page"></div>
+
+  <script>
+    const p = new URLSearchParams(location.search);
+    document.getElementById('shot').src = 'shots/' + (p.get('shot') || 'console') + '.png';
+  </script>
+</body>
+</html>

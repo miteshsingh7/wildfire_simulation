@@ -1,0 +1,294 @@
+[0] Air-Traffic Conflict-Risk Advisory Agent (atc-conflict-advisory)
+
+[1] Project Description:
+
+[2] Air-Traffic Conflict-Risk Advisory Agent is an offline, advisory-only research prototype for investigating trajectory prediction, separation monitoring, and loss-of-separation (LoS) risk advisory algorithms in high-density en-route airspace. This software is for research simulation only and is not for operational use — it must never be connected to any live air-traffic control (ATC) or operational flight-management system.
+
+[3] The project pairs a vectorized geometric conflict-detection engine with two kinematic baselines and a residual LSTM trajectory predictor, benchmarked with scenario-level train/validation/test splits and 95% scenario-level bootstrap confidence intervals across three calibrated synthetic complexity tiers (easy, hard_v1, hard_large) and an empirical live ADS-B sample collected from the OpenSky Network. A ConflictAdvisoryAgent wraps the full pipeline — history extraction, trajectory prediction, pairwise closest-point-of-approach geometry, and conflict classification — into a single Python API, and the AeroMetrics Conflict Research Console, a FastAPI-backed single-page web application, exposes the same predictors and live-computed benchmark metrics for interactive scenario replay and diagnostic inspection.
+
+[4] Repository: github.com/miteshsingh7/Air-traffic-agent
+
+[5] Scenarios
+
+[6] Scenario 1: Offline Trajectory Prediction and Conflict-Risk Screening: A researcher loads a high-density synthetic scenario from the hard_large benchmark into the ConflictAdvisoryAgent. The agent extracts 60-second history windows for every aircraft pair at 30-second prediction origins, runs the trained residual LSTM to forecast 300 seconds ahead, computes pairwise closest-point-of-approach geometry, and returns a ScenarioAdvisoryReport flagging which aircraft pairs breach the 5.0 NM / 1,000 ft separation minima, together with the earliest predicted lead time to loss of separation.
+
+[7] Scenario 2: Empirical Validation Against Real ADS-B Surveillance: An evaluator wants to know whether a model trained purely on synthetic trajectories generalizes to genuine flight dynamics. The live collector polls the OpenSky Network’s public REST endpoint over the Central European en-route sector for 20 minutes, reassembling continuous real aircraft tracks, and a dedicated evaluation script scores both the kinematic baseline and the residual LSTM against this empirical sample side by side with their synthetic-benchmark numbers, surfacing exactly where the learned model’s error grows rather than shrinks.
+
+[8] Scenario 3: Model Governance and Live-Metric Verification: An engineer auditing the deployed Research Console opens the Model Benchmarks view. Rather than trusting a cached headline number, every reported precision, recall, F1, false-alarm rate, and lead-time figure is computed live by the same evaluation engine used by the command-line benchmark, with zero hardcoded metric dictionaries — giving a governance-ready guarantee that the number on screen matches what a fresh command-line run would produce.
+
+[9] Technical Architecture:
+
+[11] Figure: ConflictAdvisoryAgent Residual-LSTM Prediction and Conflict-Classification Pipeline (from src/models/lstm_predictor.py, src/conflict/geometry.py, src/agent/advisor.py)
+
+[12] The technical architecture consists of five interconnected subsystems: the synthetic scenario pipeline, the vectorized conflict-geometry engine, the two kinematic baselines, the residual LSTM predictor, and the ConflictAdvisoryAgent together with its AeroMetrics Research Console.
+
+[13] Synthetic Scenario Pipeline: Generates calibrated multi-aircraft trajectories (easy / hard_v1 / hard_large tiers) with maneuver injection, near-miss encounters, and Gaussian observation noise applied to history only; ground-truth conflicts are computed geometrically and cross-checked with a dedicated label-audit script, and each frozen dataset is protected by a content-addressed SHA-256 hash.
+
+[14] Kinematic Baselines: cv_3step (3-step backward finite difference) and cv_smoothed (full-history least-squares linear fit), the latter serving as the residual LSTM’s zero-initialization anchor.
+
+[15] Residual LSTM Predictor: A 2-layer LSTM (hidden size 128) consuming 6-dimensional per-step features (relative position and step delta, both scale-normalized), with a zero-initialized MLP head so that at epoch 0 its output is numerically identical to cv_smoothed; trained with SmoothL1 loss on the normalized residual, AdamW, gradient clipping, and ReduceLROnPlateau.
+
+[16] Conflict Geometry & Advisory Agent: Vectorized pairwise closest-point-of-approach computation (src/conflict/geometry.py, src/conflict/risk.py) feeding one shared compute_conflict_risk() formula, wrapped by ConflictAdvisoryAgent into a single advise_scenario() / advise_file() call that returns a frozen ScenarioAdvisoryReport dataclass.
+
+[17] AeroMetrics Research Console: A FastAPI backend (src/ui/app.py, src/ui/service.py) computing every served metric live via the same evaluation engine as the CLI, rendering a five-module single-page frontend (Conflict Prediction, Resolution Engine, Trajectory Inspector, LoS Advisory Ledger, Model Benchmarks) with a persistent research-only disclaimer banner.
+
+[18] Pre-requisites:
+
+[19] Python Environment: Python 3.10 or higher, with PyTorch 2.0+ as the deep learning framework. Python Documentation | PyTorch Documentation
+
+[20] Core Data & Scientific Libraries: NumPy, Pandas, PyArrow (parquet I/O), PyYAML (configs/default.yaml), SciPy, scikit-learn, and Matplotlib. Docs: NumPy | Pandas | PyArrow | PyYAML | SciPy | scikit-learn | Matplotlib
+
+[21] Research Console: FastAPI 0.100+ and Uvicorn as the ASGI server, with httpx used as the test client; the frontend is a static single-page application with no build step. Docs: FastAPI Documentation | Uvicorn Documentation | httpx Documentation
+
+[22] Live Surveillance Data: The OpenSky Network’s public live REST endpoint (states/all) for empirical ADS-B collection. Authenticated historical access was evaluated and found unavailable to this project (HTTP 403, academic-account only), so only live polling is used. Docs: OpenSky Network REST API Documentation
+
+[23] Testing: pytest 7.3+, covering conflict geometry, synthetic scenario generation, the kinematic baselines, the LSTM model, dataset splitting and hashing, the ConflictAdvisoryAgent, and the FastAPI research console. Docs: pytest Documentation
+
+[24] Version Control: Git, with frozen synthetic datasets and the trained checkpoint (checkpoints/lstm_v1/best.pt) committed alongside the code for reproducibility. Docs: Git Documentation
+
+[25] Project Workflow:
+
+  [26.r0] Milestone || Activities & Core Focus
+  [26.r1] Milestone 1: Synthetic Scenario Generation & Conflict Geometry || Activity 1.1: Calibrated multi-tier trajectory generation / Activity 1.2: Vectorized pairwise loss-of-separation geometry / Activity 1.3: Geometric label audit & content-addressed dataset hashing
+  [26.r2] Milestone 2: Kinematic Baseline Predictors || Activity 2.1: 3-step finite-difference baseline (cv_3step) / Activity 2.2: Full-history least-squares baseline (cv_smoothed)
+  [26.r3] Milestone 3: Residual LSTM Trajectory Model || Activity 3.1: Feature extraction & zero-initialized residual head / Activity 3.2: Training loop with gradient clipping & early stopping
+  [26.r4] Milestone 4: Evaluation, Benchmarking & Empirical Validation || Activity 4.1: Multi-horizon RMSE & bootstrap conflict metrics / Activity 4.2: Test-split benchmark runner (cv_3step / cv_smoothed / lstm) / Activity 4.3: Live OpenSky ADS-B polling & track reassembly / Activity 4.4: Empirical generalization evaluation & honest failure reporting
+  [26.r5] Milestone 5: Conflict Advisory Agent & Research Console || Activity 5.1: ConflictAdvisoryAgent end-to-end pipeline / Activity 5.2: FastAPI backend with live-metric computation guarantee / Activity 5.3: AeroMetrics five-module research console UI
+  [26.r6] Milestone 6: Code Review, Testing & Documentation || Activity 6.1: Shared conflict-risk formula unification & bug fixes / Activity 6.2: TDD test-suite expansion (95 tests across 11 files) / Activity 6.3: README / REPORT documentation refresh
+
+[27] Milestone 1: Synthetic Scenario Generation, Conflict Geometry and Dataset Integrity
+
+[28] Milestone 1 builds the offline research foundation: a calibrated synthetic trajectory generator across three complexity tiers, a vectorized geometric engine for computing ground-truth loss-of-separation, and integrity tooling (label auditing and content-addressed hashing) so that every downstream benchmark number traces back to a frozen, verifiable dataset.
+
+[29] Activity 1.1: Calibrated Multi-Tier Trajectory Generation
+
+[30] Step 1: Configure Airspace and Separation Standards: configs/default.yaml and the TrajectoryConfig dataclass fix the research airspace to a 200 x 200 NM horizontal domain between 10,000 ft and 40,000 ft, a 5.0 NM lateral / 1,000 ft vertical separation minimum, a 5-second sampling interval, a 60-second (13-step) observation history, and a 300-second (60-step) look-ahead horizon.
+
+[31] Step 2: Generate Three Calibrated Complexity Tiers: ScenarioGenerator (src/data/synthetic.py) produces easy (500 scenarios, seed 42, pure straight-line cruise, noise-free), hard_v1 (500 scenarios, seed 1042, ~50% maneuvering conflicts with standard-rate turns and climbs/descents, near-miss encounters, and Gaussian history-only observation noise — 150 confirmed conflict scenarios, 0 accidental conflicts), and hard_large (3,000 scenarios, seed 2042, identical dynamics under an independent seed, split 2,100 train / 450 val / 450 test — 900 confirmed conflict scenarios, 146 distinct conflict pairs in the test split).
+
+[32] Source Code: src/data/synthetic.py (TrajectoryConfig, abridged):
+
+  [33.r0] @dataclass(frozen=True) / class TrajectoryConfig: /     """Configuration parameters for synthetic trajectory simulation.""" /     lateral_min_nm: float = 5.0 /     vertical_min_ft: float = 1000.0 /     resample_rate_s: float = 5.0 /     history_s: float = 60.0 /     horizon_s: float = 300.0 /     x_min_nm: float = 0.0 /     x_max_nm: float = 200.0 /     alt_min_ft: float = 10000.0 /     alt_max_ft: float = 40000.0 /     min_aircraft: int = 2 /     max_aircraft: int = 8 /     conflict_probability: float = 0.30 /     maneuver_conflict_prob: float = 0.50 /     near_miss_scenario_prob: float = 0.25 /     noise_sigma_horizontal_nm: float = 0.0 /     noise_sigma_vertical_ft: float = 0.0 /     dataset_variant: str = "easy" /     seed: int = 42
+
+[34] Activity 1.2: Vectorized Pairwise Loss-of-Separation Geometry
+
+[35] Step 1: Define the Conflict Condition: a loss of separation at time t is defined as lateral_distance(t) < 5.0 NM AND |Δaltitude(t)| < 1,000 ft, evaluated over every unique unordered aircraft pair in a scenario.
+
+[36] Step 2: Compute Ground-Truth Conflicts: compute_scenario_conflicts (src/conflict/geometry.py) merges each aircraft pair’s trajectories on synchronized timestamps and vectorizes the lateral/vertical distance check with NumPy, returning a ConflictRecord (first conflict time, minimum lateral/vertical distance, duration) for every violating pair.
+
+[37] Source Code: src/conflict/geometry.py (compute_scenario_conflicts, abridged):
+
+  [38.r0] for i in range(num_aircraft): /     track_1 = tracks[aircraft_ids[i]] /     for j in range(i + 1, num_aircraft): /         track_2 = tracks[aircraft_ids[j]] /         merged = pd.merge(track_1, track_2, on="t", suffixes=("_1", "_2")) /         if merged.empty: /             continue /         dx = merged["x_nm_1"].to_numpy() - merged["x_nm_2"].to_numpy() /         dy = merged["y_nm_1"].to_numpy() - merged["y_nm_2"].to_numpy() /         lateral_dist = np.hypot(dx, dy) /         vertical_dist = np.abs(merged["alt_ft_1"].to_numpy() - merged["alt_ft_2"].to_numpy()) /         is_conflict = (lateral_dist < lateral_min_nm) & (vertical_dist < vertical_min_ft) /         if not np.any(is_conflict): /             continue /         # ... derive first_conflict_time, min_lat, min_vert, duration_s /         conflicts.append(ConflictRecord(scenario_id, acid_1, acid_2, ...))
+
+[39] Activity 1.3: Geometric Label Audit and Content-Addressed Dataset Hashing
+
+[40] Step 1: Audit Ground-Truth Labels: label_audit.py (src/eval/label_audit.py) re-derives conflict labels directly from trajectory geometry for every scenario parquet file and cross-checks the result against the dataset’s own recorded injection flags, catching any mismatch between "intended" and "actually occurring" conflicts before a single model is trained.
+
+[41] Step 2: Freeze and Verify Dataset Integrity: dataset_hash.py computes a SHA-256 digest over the sorted, concatenated parquet contents of a dataset directory (compute_parquet_content_sha256) and writes it to a DATASET_HASH.txt manifest; --verify re-computes and compares the digest so that hard_v1 and hard_large stay byte-for-byte reproducible across machines.
+
+[42] Source Code: src/data/dataset_hash.py (compute_parquet_content_sha256, abridged):
+
+  [43.r0] def compute_parquet_content_sha256(data_dir: str | Path) -> str: /     """Compute SHA-256 digest over the raw bytes of every parquet file, sorted by filename.""" /     p_dir = Path(data_dir) /     parquet_files = sorted(p_dir.glob("*.parquet"), key=lambda p: p.name) /     if not parquet_files: /         raise FileNotFoundError(f"No parquet files found in {data_dir} to hash") /   /     hasher = hashlib.sha256() /     for pf in parquet_files: /         hasher.update(pf.read_bytes()) /     return hasher.hexdigest()
+
+[44] Milestone 2: Kinematic Baseline Predictors
+
+[45] Before any learned model is trained, two purely kinematic predictors establish the baseline that the residual LSTM must beat — and, per its zero-initialization design, initially reproduces exactly.
+
+[46] Activity 2.1: 3-Step Finite-Difference Baseline (cv_3step)
+
+[47] Step 1: Estimate Velocity from the Last 3 History Steps: ConstantVelocityPredictor estimates velocity as v = (pos[-1] - pos[-3]) / (2·dt) and linearly extrapolates forward. Being sensitive to observation noise on only two samples, it forms the "naive" reference the smoothed baseline and LSTM are compared against.
+
+[48] Source Code: src/models/baseline.py (ConstantVelocityPredictor, abridged):
+
+  [49.r0] class ConstantVelocityPredictor: /     """Predicts future aircraft positions via constant-velocity linear extrapolation. /   /     Velocity in (x, y, alt) is estimated from the last 3 history steps: /         v = (pos[-1] - pos[-3]) / (2 * dt) /     and extrapolated linearly over the horizon: /         pos_pred(t0 + k * dt) = pos[-1] + v * (k * dt) /     """ /   /     def __init__(self, dt_s: float = 5.0, horizon_steps: int = 60) -> None: /         if dt_s <= 0: /             raise ValueError(f"dt_s must be positive, got {dt_s}") /         if horizon_steps <= 0: /             raise ValueError(f"horizon_steps must be positive, got {horizon_steps}") /         self.dt_s = dt_s /         self.horizon_steps = horizon_steps
+
+[50] Activity 2.2: Full-History Least-Squares Baseline (cv_smoothed)
+
+[51] Step 1: Fit a Straight Line Across All 13 History Steps: SmoothedConstantVelocityPredictor fits pos_fit(k) = a + b·k by ordinary least squares over the complete 60-second observation window, filtering high-frequency observation noise while remaining exact on genuinely straight tracks.
+
+[52] Step 2: Anchor the Residual LSTM’s Zero-Initialization Contract: this exact least-squares formula is re-implemented as a vectorized PyTorch buffer inside LSTMTrajectoryPredictor.compute_baseline_cv, so the neural model’s baseline term is numerically identical to the standalone cv_smoothed predictor.
+
+[53] Source Code: src/models/baseline.py (SmoothedConstantVelocityPredictor, abridged):
+
+  [54.r0] k_indices = np.arange(n_steps, dtype=np.float64) / k_mean = (n_steps - 1.0) / 2.0 / k_centered = k_indices - k_mean / denom = float(np.sum(k_centered**2)) /   / y_mean = np.mean(history, axis=1) / slope = np.sum(history * k_centered[np.newaxis,:,np.newaxis], axis=1) / denom /   / current_k_offset = (n_steps - 1.0) - k_mean / pos_current_fit = y_mean + slope * current_k_offset /   / h_offsets = np.arange(1, self.horizon_steps + 1, dtype=np.float64) / future_pred = (pos_current_fit[:, np.newaxis, :] /                + h_offsets[np.newaxis, :, np.newaxis] * slope[:, np.newaxis, :])
+
+[55] Milestone 3: Residual LSTM Trajectory Model
+
+[56] Milestone 3 replaces the fixed kinematic extrapolation with a learned residual correction, designed so that an untrained model behaves identically to the kinematic baseline and only diverges from it as training teaches it genuine nonlinear maneuver patterns.
+
+[57] Activity 3.1: Feature Extraction and Zero-Initialized Residual Head
+
+[58] Step 1: Extract Scale-Normalized Features: extract_features converts each 13-step history into 6 channels per step — relative position (p_t - p_-1)/scale and step delta (p_t - p_t-1)/scale — using a 10 NM lateral / 1,000 ft vertical scale buffer, feeding a 2-layer LSTM (hidden size 128).
+
+[59] Step 2: Zero-Initialize the Output Head: the final Linear(128, 180) layer’s weights and bias are explicitly zero-initialized, so that at epoch 0 the model’s residual output is exactly zero and its prediction exactly equals compute_baseline_cv — a verifiable, testable contract rather than an approximate one.
+
+[60] Source Code: src/models/lstm_predictor.py (LSTMTrajectoryPredictor, abridged):
+
+  [61.r0] self.lstm = nn.LSTM(input_size=6, hidden_size=hidden_size, /                      num_layers=num_layers, batch_first=True) /   / self.head = nn.Sequential( /     nn.Linear(hidden_size, hidden_size), /     nn.ReLU(), /     nn.Linear(hidden_size, horizon_steps * 3), / ) /   / # Zero-initialize the final linear layer so residual output is initially 0 / nn.init.zeros_(self.head[-1].weight) / nn.init.zeros_(self.head[-1].bias) /   / def extract_features(self, history: torch.Tensor) -> torch.Tensor: /     origin_pos = history[:, -1:, :] /     rel_pos = (history - origin_pos) / self.scale /     deltas = (history[:, 1:, :] - history[:, :-1, :]) / self.scale /     step_deltas = torch.cat([deltas[:, :1, :], deltas], dim=1) /     return torch.cat([rel_pos, step_deltas], dim=2)
+
+[62] Activity 3.2: Training Loop with Gradient Clipping and Early Stopping
+
+[63] Step 1: Enforce Strict Split Isolation: train() asserts that the train, validation, and test scenario-ID sets are pairwise disjoint before a single batch is loaded, printing "CRITICAL" and halting if a scenario ever leaks across splits.
+
+[64] Step 2: Train on the Normalized Residual: each step computes the target residual as (future_true - baseline_cv)/scale and trains with SmoothL1Loss, AdamW (lr=1e-3, weight_decay=1e-4), gradient-norm clipping at 5.0, and ReduceLROnPlateau, checkpointing best.pt on the lowest validation loss with early stopping (patience=6) over a 40-epoch budget.
+
+[65] Source Code: src/models/train_lstm.py (train, split-isolation assertions, abridged):
+
+  [66.r0] train_ids, val_ids, test_ids = set(splits["train"]), set(splits["val"]), set(splits["test"]) / assert train_ids.isdisjoint(test_ids), "CRITICAL: Train split contains test scenarios!" / assert val_ids.isdisjoint(test_ids), "CRITICAL: Val split contains test scenarios!" / assert train_ids.isdisjoint(val_ids), "CRITICAL: Train and val splits overlap!" /   / criterion = nn.SmoothL1Loss(beta=1.0) / optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay) / scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2) /   / for b_hist, b_fut in train_loader: /     _, delta_norm = model(b_hist, return_residual=True) /     baseline_cv = model.compute_baseline_cv(b_hist) /     target_residual_norm = (b_fut - baseline_cv) / scale_dev /     loss = criterion(delta_norm, target_residual_norm) /     loss.backward() /     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0) /     optimizer.step()
+
+[67] Milestone 4: Evaluation, Benchmarking and Empirical OpenSky Validation
+
+[68] Milestone 4 evaluates every predictor on two fronts — trajectory position error and pairwise conflict-classification performance — first on the frozen synthetic test split with bootstrap confidence intervals, then against a genuinely live-collected empirical ADS-B sample, and reports the resulting generalization gap honestly rather than only the numbers that flatter the model.
+
+[69] Activity 4.1: Multi-Horizon Position RMSE and Bootstrap Conflict Metrics
+
+[70] Step 1: Compute Horizontal and Vertical RMSE: evaluate_position_errors (src/eval/metrics.py) reports horizontal (x/y Euclidean) and vertical (altitude) RMSE at six forecast horizons — 30, 60, 120, 180, 240, and 300 seconds.
+
+[71] Step 2: Compute Conflict-Classification Metrics with Bootstrap CIs: evaluate_conflict_prediction (src/eval/conflict_eval.py) classifies every (aircraft-pair, prediction-origin) sample as TP/FP/FN/TN against ground truth, reporting precision, recall, F1, false alarms per 1,000 negatives, a false-positive breakdown by category and cause, maneuvering vs. non-maneuvering subset recall, mean-absolute time-to-conflict error, and 95% confidence intervals resampled at the scenario level (1,000 bootstrap draws).
+
+[72] Source Code: src/eval/metrics.py (evaluate_position_errors, abridged):
+
+  [73.r0] for h in horizons_s: /     step_idx = int(round(h / dt_s)) - 1 /     pred_step, true_step = y_pred[:, step_idx, :], y_true[:, step_idx, :] /   /     dx = pred_step[:, 0] - true_step[:, 0] /     dy = pred_step[:, 1] - true_step[:, 1] /     horiz_rmse = float(np.sqrt(np.mean(dx**2 + dy**2))) /   /     dz = pred_step[:, 2] - true_step[:, 2] /     vert_rmse = float(np.sqrt(np.mean(dz**2))) /   /     results.append(PositionErrorMetric(horizon_s=int(h), /         horizontal_rmse_nm=horiz_rmse, vertical_rmse_ft=vert_rmse, num_samples=n_samples))
+
+[74] Activity 4.2: Test-Split Benchmark Runner
+
+[75] Step 1: Benchmark All Three Predictors: run_baseline.py evaluates cv_3step, cv_smoothed, and lstm against the isolated hard_large TEST split (450 scenarios, 155,498 sample pairs). Per REPORT.md Table 2, the residual LSTM reduced false positives from 56 to 6 and raised sample-level F1 from 0.9099 to 0.9425 against cv_smoothed, while per Table 1 it reduced 300 s position RMSE from 2.9138 NM / 421.58 ft to 2.6798 NM / 148.90 ft.
+
+[76] Activity 4.3: Live OpenSky ADS-B Polling and Track Reassembly
+
+[77] Step 1: Poll the Public Live Endpoint: live_collector.py polls https://opensky-network.org/api/states/all over the Central European en-route sector (49.0°–52.0° N, 7.0°–11.0° E, > FL100) every 12 seconds for 20 minutes, collecting 5,359 state-vector observations across 118 aircraft.
+
+[78] Step 2: Reassemble Continuous Tracks: 84 flights maintained ≥ 6 minutes of continuous surveillance, yielding 985 valid 60 s-history / 300 s-future prediction windows projected onto a local Cartesian plane — genuinely observed flight dynamics, not synthesized.
+
+[79] Note (governance): an unauthenticated OpenSky S3 historical sample archive was initially retrieved but discarded, since it was not accessed through OpenSky’s primary authenticated interface; the historical REST API itself returned HTTP 403 (academic-account only), so only the public live-polling endpoint is used.
+
+[80] Activity 4.4: Empirical Generalization Evaluation and Honest Failure Reporting
+
+[81] Step 1: Evaluate Both Predictors on the Live Sample: run_opensky_eval.py scores cv_smoothed and the trained LSTM checkpoint against the 985 live OpenSky windows using the identical position-error and conflict metrics as the synthetic benchmark.
+
+[82] Step 2: Report the Vertical Generalization Failure: the LSTM’s vertical RMSE was worse than cv_smoothed at every single reported horizon on real flights — 867.98 ft vs. 396.31 ft at 60 s, 4,334.14 ft vs. 2,778.97 ft at 300 s — while its lateral improvement shrank from +28.7% in simulation to +5.3% in the empirical sample. This is attributed to training on idealized piecewise-linear synthetic altitude profiles, which do not represent real barometric drift and operational flight-level changes, and is reported in REPORT.md as an explicit, unresolved limitation rather than smoothed over.
+
+[83] Milestone 5: Conflict Advisory Agent and Research Console
+
+[84] Milestone 5 packages the trained predictors into a single reusable Python API and a browser-based research workstation, so a scenario can be assessed either from a script or interactively.
+
+[85] Activity 5.1: ConflictAdvisoryAgent End-to-End Pipeline
+
+[86] Step 1: Wrap Prediction and Geometry Behind One Call: ConflictAdvisoryAgent.advise_scenario() (src/agent/advisor.py) extracts prediction-origin history windows every 30 seconds, runs the configured predictor (any object implementing a predict(history) protocol) over every aircraft, computes pairwise closest-point-of-approach geometry, classifies each sample, and returns a frozen ScenarioAdvisoryReport dataclass — flagged_pairs, max_p_risk, earliest_lead_time_s, and the full per-sample advisory tuple.
+
+[87] Step 2: Cover the Pipeline with Test-Driven Development: the agent was built alongside 34 dedicated unit and integration tests (tests/test_agent.py) covering CPA geometry, risk classification, lead-time computation, and both advise_scenario() and advise_file() entry points (commit 2485272), before being documented in the README’s Python API section (commit d7e0554).
+
+[88] Source Code: src/agent/advisor.py (ConflictAdvisoryAgent, constructor abridged):
+
+  [89.r0] class ConflictAdvisoryAgent: /     """Research-only conflict-risk advisory agent. /   /     Ingests a scenario (as a DataFrame or parquet file), extracts /     prediction origins, runs the configured predictor over every aircraft, /     computes pairwise CPA geometry, classifies predicted loss-of-separation, /     and returns a structured ScenarioAdvisoryReport. /     """ /   /     def __init__(self, predictor: TrajectoryPredictor, /                  lateral_min_nm: float = 5.0, vertical_min_ft: float = 1000.0, /                  dt_s: float = 5.0, horizon_steps: int = 60, /                  history_steps: int = 13, origin_step_s: float = 30.0, /                  use_noisy_history: bool = True) -> None: /         ...
+
+[90] Activity 5.2: FastAPI Backend with a Live-Metric Computation Guarantee
+
+[91] Step 1: Serve System, Dataset, Scenario, and Metrics Endpoints: src/ui/app.py exposes /api/system, /api/datasets, /api/scenarios, /api/scenario/{id}, and /api/metrics over a FastAPI app with CORS enabled for the static frontend.
+
+[92] Step 2: Guarantee Zero Hardcoded Metrics: /api/metrics calls run_test_evaluation() from src.eval.run_baseline — the exact same engine used by the command-line benchmark — for every request; results are cached in-memory purely to avoid recomputation across rapid view switches, never as a substitute for a real calculation. A dedicated fix (commit 3d36b80, "eliminate static metric shortcuts and ensure dynamic evaluation parity") removed an earlier shortcut to guarantee this.
+
+[93] Step 3: Harden the API Surface: a follow-up pass (commit 1291bf2) enforced strict split-membership checks, filtered scenarios whose backing parquet file is absent, mapped client errors to proper 400/404 responses instead of 500s, hardened CORS configuration, and added explicit train/val sample-count tracking to the diagnostics payload.
+
+[94] Source Code: src/ui/service.py (get_benchmark_metrics docstring, abridged):
+
+  [95.r0] def get_benchmark_metrics( /     dataset: str = "hard_v1", /     split: str = "test", /     model_name: str = "cv_smoothed", / ) -> dict[str, Any]: /     """Retrieve benchmark evaluation metrics for given dataset, split, and model. /   /     Always computes metrics live via run_test_evaluation with no hardcoded /     shortcuts. Results are cached in-memory in _METRICS_CACHE. /     """ /     cache_key = f"{dataset}_{split}_{model_name}" /     if cache_key in _METRICS_CACHE: /         return _METRICS_CACHE[cache_key] /     # ... resolve dataset variant, split, and model, then: /     # result = run_test_evaluation(variant=variant, split=split, model=model_arg, ...) /     # _METRICS_CACHE[cache_key] = result
+
+[96] Activity 5.3: AeroMetrics Five-Module Research Console UI
+
+[97] Step 1: Structure the Console Around Five Research Modules: the single-page frontend (src/ui/static/index.html, app.js) organizes around five navigable modules — Conflict Prediction (a radar-style plan-view of the active encounter with live P(risk), CPA distance, time-to-CPA, and closure rate), Resolution Engine (candidate tactical resolution advisories), Trajectory Inspector (per-aircraft altitude profile and telemetry table), LoS Advisory Ledger (a filterable table of every scenario’s conflict status), and Model Benchmarks (precision/recall/F1/false-alarm/lead-time bars) — plus a Scenario Replay control strip.
+
+[98] Step 2: Keep the Safety Disclaimer Persistent: every view renders the same amber "RESEARCH SIMULATION — ADVISORY ONLY — NOT FOR OPERATIONAL USE" banner, matching the safety notice carried in the README and REPORT.md.
+
+[99] Source Code: src/ui/static/index.html (research module navigation, abridged):
+
+  [100.r0] <div id="researchNav"> /   <a data-module="conflict-prediction" aria-current="page"> /     <span class="material-symbols-outlined">radar</span> /     <span>Conflict Prediction</span> /   </a> /   <a data-module="resolution-engine"> /     <span class="material-symbols-outlined">route</span> /     <span>Resolution Engine</span> /   </a> /   <a data-module="trajectory-inspector">...Trajectory Inspector</a> /   <a data-module="los-ledger">...LoS Advisory Ledger</a> /   <a data-module="model-benchmarks">...Model Benchmarks</a> / </div>
+
+[101] Milestone 6: Code Review, Testing and Documentation
+
+[102] Milestone 6 covers a self-directed review pass after the initial build — unifying duplicated logic, closing a numerical-warning gap, expanding the automated test suite, and bringing the documentation in line with the shipped Python API.
+
+[103] Activity 6.1: Unifying the Conflict-Risk Formula
+
+[104] Step 1: Extract One Shared Risk Function: before this pass, the linear risk-decay formula (min(lat_risk, vert_risk)) was duplicated independently in ConflictAdvisoryAgent._classify and in the Research Console’s service layer. compute_conflict_risk() (src/conflict/risk.py) now holds the single implementation, re-exported from both src.conflict and src.agent, with both call sites refactored to delegate to it (commit 8a93b7a).
+
+[105] Step 2: Fix a PyTorch Non-Writable-Array Warning: src/models/lstm_predictor.py now explicitly makes chunked NumPy history arrays contiguous and writable before torch.as_tensor(), resolving a UserWarning that previously appeared on every batched inference call.
+
+[106] Source Code: src/conflict/risk.py (compute_conflict_risk, complete):
+
+  [107.r0] def compute_conflict_risk( /     cpa_lateral_nm: float, /     cpa_vertical_ft: float, /     lateral_min_nm: float = 5.0, /     vertical_min_ft: float = 1000.0, / ) -> float: /     """Compute continuous conflict risk score P(risk) in [0, 1]. /   /     Defined as min(lat_risk, vert_risk), where each axis risk decays /     linearly from 1.0 at zero separation to 0.0 at the separation minimum. /     """ /     if lateral_min_nm <= 0: /         raise ValueError(f"lateral_min_nm must be positive, got {lateral_min_nm}") /     if vertical_min_ft <= 0: /         raise ValueError(f"vertical_min_ft must be positive, got {vertical_min_ft}") /   /     lat_risk = max(0.0, 1.0 - cpa_lateral_nm / lateral_min_nm) /     vert_risk = max(0.0, 1.0 - cpa_vertical_ft / vertical_min_ft) /     return float(min(lat_risk, vert_risk))
+
+[108] Activity 6.2: Test-Driven Development and Suite Expansion
+
+[109] Step 1: Grow the Suite Alongside Every Feature: the project’s pytest suite (tests/) now totals 95 test functions across 11 files, spanning conflict geometry (7), the hard-dataset generator (8), synthetic scenario generation (5), scenario splitting (3), sliding windows (3), the constant-velocity baselines (4), the LSTM model (6), conflict evaluation (4), the label audit (2), the FastAPI research console (15), and the ConflictAdvisoryAgent alone (38, grown from the 34 written test-first in Activity 5.1).
+
+[110] Step 2: Add a Dedicated Risk-Formula Test Suite: the risk-formula unification (Activity 6.1) shipped with its own TestComputeConflictRisk unit-test class and two new UI-API assertions checking closing_speed_kt and the P(risk) value range in the live "active pair" payload.
+
+[111] Activity 6.3: README and REPORT Documentation Refresh
+
+[112] Step 1: Document the Python API: README.md Section 5.7 was added to show the ConflictAdvisoryAgent’s public advise_file() call end-to-end, alongside an updated Section 6 REST API specification table and test-count figures (commit d7e0554).
+
+[113] Step 2: Keep the Safety Disclaimer and Limitations Explicit: REPORT.md’s Section 5 (Explicit Limitations & Failure Analysis) documents the vertical-generalization failure, the small scale of the empirical sample, and one unresolved historical discrepancy between two logged metric runs, in keeping with the project’s non-operational research-prototype framing.
+
+[114] Important Notes:
+
+[115] Non-Operational Research Prototype: this software and its trained models must never be connected to any live air-traffic control, flight-management, or operational surveillance system; every view of the Research Console carries a persistent advisory-only disclaimer.
+
+[116] Zero-Hardcoded-Metric Guarantee: every number the Research Console displays is computed live by the same evaluation engine used by the command-line benchmarks; an earlier static-shortcut implementation was found and replaced (commit 3d36b80) specifically to close this gap.
+
+[117] Vertical Generalization Failure, Reported Not Hidden: the residual LSTM’s learned vertical corrections do not generalize to real OpenSky flights — vertical RMSE is worse than the kinematic baseline at every empirical horizon — and this is documented as an open limitation in REPORT.md rather than omitted.
+
+[118] OpenSky Historical Access Restriction: the OpenSky Network’s historical REST API requires an approved academic account and returned HTTP 403 to this project; an unauthenticated S3 sample archive was initially retrieved but discarded under the project’s own data-governance standard, and only the public live-polling endpoint is used for empirical validation.
+
+[119] Strict Scenario-Level Split Isolation: training asserts, at runtime, that no scenario ID appears in more than one of the train/validation/test sets, halting immediately if isolation is ever violated.
+
+[120] README / REPORT Metric Discrepancy (Unresolved): README.md’s summary bullet reports the LSTM’s hard_large TEST F1 as 0.9230, while REPORT.md’s Table 2 reports 0.9425 for the same evaluation; both figures were found verbatim in the current repository and the discrepancy has not been reconciled as of this documentation pass.
+
+[121] Exploring the Web Application:
+
+[122] The AeroMetrics Conflict Research Console (src/ui/app.py, src/ui/static/) is launched locally with "python3 -m uvicorn src.ui.app:app --host 127.0.0.1 --port 8000" and opened at http://127.0.0.1:8000. It organizes around five navigable research modules plus a persistent scenario-replay control strip, described below.
+
+[123] Conflict Prediction and Resolution Engine Views
+
+[124] The Conflict Prediction view renders a radar-style plan view of the currently selected scenario and prediction origin, with a header strip reporting the active compute device, dataset spec, model tag, and look-ahead horizon. Selecting an aircraft pair populates live current-separation, CPA distance, CPA vertical, time-to-CPA, and closure-rate readouts, with a colored risk chip and conflict badge driven directly by compute_conflict_risk(). The Resolution Engine view lists candidate tactical resolution advisories for the active flagged pair, each with a short title, description, and the resulting predicted vertical or lateral separation change.
+
+[126] Figure: AeroMetrics Research Console — Conflict Prediction view
+
+[128] Figure: AeroMetrics Research Console — Resolution Engine view
+
+[129] Trajectory Inspector, LoS Advisory Ledger and Model Benchmarks
+
+[130] The Trajectory Inspector view plots each aircraft’s altitude profile against time on an SVG chart alongside a per-timestep telemetry table (altitude, ground speed, heading, rate of climb/descent). The LoS Advisory Ledger lists every scenario in the selected dataset split with its conflict-presence flag, trajectory tag (MANEUVERING, NEAR_MISS, or NOMINAL), and aircraft count, filterable and paged for quick triage. The Model Benchmarks view renders the same precision, recall, F1, false-alarm-rate, and mean lead-time figures reported in REPORT.md as live bar charts, computed by /api/metrics rather than read from a static table.
+
+[132] Figure: AeroMetrics Research Console — Trajectory Inspector view
+
+[134] Figure: AeroMetrics Research Console — LoS Advisory Ledger view
+
+[136] Figure: AeroMetrics Research Console — Model Benchmarks view
+
+[137] Navigation: Scenario Replay and the Research-Only Disclaimer
+
+[138] A persistent transport strip (Play, Pause, step-back/forward, and 0.5x–10x speed controls) drives a scrolling timeline scrubber shared across all five views, alongside dataset and split selectors and CSV/JSON/metrics export buttons. Every view renders the same fixed amber disclaimer banner — RESEARCH SIMULATION — ADVISORY ONLY — NOT FOR OPERATIONAL USE — carrying the same safety framing as the README and REPORT.md into the interactive surface itself.
+
+[139] Time Taken at Different Project Stages
+
+[140] The timeline below is reconstructed directly from the repository’s own commit history (git log), in keeping with a preference for traceable, verifiable records over a separately kept time log. The first commit already contains the full initial research stack — synthetic data pipeline, geometry engine, both kinematic baselines, the residual LSTM, the OpenSky live collector, and the complete AeroMetrics Research Console — so it is reported as a single foundational commit with no prior commit to measure elapsed time against; every stage after it is timestamped directly from individual commits.
+
+  [141.r0] Stage || Window || Elapsed
+  [141.r1] Foundational commit: synthetic pipeline, geometry engine, baselines, residual LSTM, OpenSky collector, FastAPI Research Console (5-module UI) || 25 Sep 11:18 || N/A (first commit)
+  [141.r2] Dynamic-evaluation fix: eliminate static metric shortcuts in /api/metrics || 25 Sep 11:18 – 15:24 || ~4h 7m
+  [141.r3] Test-suite stabilization: fix clean-clone failures, commit test scenario fixtures, correct README/warnings || 25 Sep 15:24 – 20:25 || ~5h 0m
+  [141.r4] Graceful skips for dataset-hash and consistency checks on sample-only data || 25 Sep 20:25 – 20:27 || ~2m
+  [141.r5] API hardening: split-membership checks, absent-file filtering, 400/404 error mapping, CORS, train/val sample tracking || 25 Sep 20:27 – 21:04 || ~37m
+  [141.r6] Test-warning suppression: httpx/starlette TestClient deprecations || 25 Sep 21:04 – 21:35 || ~31m
+  [141.r7] ConflictAdvisoryAgent implementation: full pipeline + 34 TDD tests || 25 Sep 21:35 – 22:12 || ~37m
+  [141.r8] Agent Python API documentation & README test-count update || 25 Sep 22:12 – 22:27 || ~15m
+  [141.r9] Post-implementation review: unify conflict-risk formula, wire closing_speed_kt, fix non-writable-array warning || 25 Sep 22:27 – 26 Sep 12:04 || ~13h 37m
+  [141.r10] TOTAL (first commit → latest commit) || 25 Sep 11:18 – 26 Sep 12:04 || ~24h 46m
+
+[142] Note: "Window" and "Elapsed" are wall-clock spans between commits, not continuous active-coding time — the ~13h 37m gap before the final review commit is an overnight calendar gap, not work hours. Because the repository’s history begins with one large foundational commit rather than incremental ones, no elapsed time is reported for the initial build itself.
+
+[143] Conclusion
+
+[144] This project investigates offline trajectory prediction and loss-of-separation advisory algorithms for high-density en-route airspace, evaluated strictly through geometric ground truth rather than any single fixed benchmark table. A vectorized conflict-geometry engine and content-addressed dataset hashing anchor three calibrated synthetic complexity tiers; a residual LSTM, zero-initialized to exactly match a full-history least-squares kinematic baseline, is trained to only improve where it earns its keep, and on the frozen hard_large test split it cut false positives from 56 to 6 and 300 s position RMSE from 2.9138 NM / 421.58 ft to 2.6798 NM / 148.90 ft. Rather than stopping at the synthetic result, the same model was scored against a genuinely live-collected OpenSky ADS-B sample, and the resulting vertical-generalization failure — worse than the kinematic baseline at every reported horizon — is reported in REPORT.md as an explicit, unresolved limitation. A ConflictAdvisoryAgent wraps the full pipeline behind one Python API call, backed by dedicated tests, and the AeroMetrics Conflict Research Console exposes the same predictors and live-computed benchmark metrics through a five-module browser interface with a persistent research-only safety disclaimer. A subsequent review pass unified a previously duplicated risk formula into one shared function, closed a PyTorch numerical warning, and grew the automated test suite to 95 functions across 11 files. Future work includes narrowing the vertical-generalization gap — likely by training on altitude profiles that better reflect real barometric drift rather than idealized piecewise-linear climbs and descents — pursuing authenticated academic access to OpenSky’s historical archive for a larger empirical validation sample, and expanding the Resolution Engine’s candidate advisories beyond the current fixed set.
+
