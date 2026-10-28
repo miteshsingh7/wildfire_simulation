@@ -64,11 +64,13 @@
     <div class="persistent-disclaimer-strip" role="alert">
       <div class="disclaimer-left">
         <svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>
-        <span class="disclaimer-title">STAND-IN WEIGHTS: surrogate untrained</span>
+        <span class="disclaimer-title">STAND-IN WEIGHTS (untrained surrogate)</span>
         <span>|</span>
-        <span>DEVELOPMENT CASE</span>
+        <span>DEVELOPMENT CASE (Camp Fire 2018)</span>
         <span>|</span>
-        <span class="disclaimer-alert">RESEARCH ONLY: not for evacuation or life-safety decisions.</span>
+        <span class="disclaimer-alert">RESEARCH ONLY: not for evacuation or life-safety decisions</span>
+        <span>|</span>
+        <span style="color:var(--outline); font-size:10px;">abandoned-vehicle onset is a modelled constant (87 min), not an observation</span>
       </div>
       <div class="disclaimer-right">
         <span class="status-dot"></span>
@@ -96,7 +98,7 @@
           <!-- Stand-in Surrogate Output Warning Chip -->
           <div id="surrogateWarningChip" class="warning-chip">
             <span>⚠️</span>
-            <span>Stand-in output, covers the whole domain</span>
+            <span>STAND-IN WEIGHTS (untrained surrogate) — covers domain, uncalibrated</span>
           </div>
 
           <!-- Checkboxes for Layers -->
@@ -110,7 +112,7 @@
               <input type="checkbox" id="chkIsochrones" class="checkbox-custom" checked>
             </label>
             <label class="control-row">
-              <span class="control-label">Observed ground truth (+11.4h)</span>
+              <span class="control-label">Observed perimeter (+11.4h)</span>
               <input type="checkbox" id="chkObservedPerimeter" class="checkbox-custom" checked>
             </label>
             <label class="control-row">
@@ -137,35 +139,35 @@
             <label class="control-row">
               <span class="control-label">
                 <span class="swatch-line" style="background-color:#45dfa4;"></span>
-                <span style="color:#45dfa4; font-weight:600;">Surrogate Forward (A3)</span>
+                <span style="color:#45dfa4; font-weight:600;">A3 surrogate stand-in</span>
               </span>
               <input type="checkbox" id="chkMethodA3" class="checkbox-custom" data-method="agent_a3" checked>
             </label>
             <label class="control-row">
               <span class="control-label">
                 <span class="swatch-line" style="background: repeating-linear-gradient(90deg, #d3c3ff, #d3c3ff 8px, transparent 8px, transparent 11px, #d3c3ff 11px, #d3c3ff 13px, transparent 13px, transparent 16px);"></span>
-                <span style="color:#d3c3ff; font-weight:600;">Agent B-on-A3</span>
+                <span style="color:#d3c3ff; font-weight:600;">B on A3</span>
               </span>
               <input type="checkbox" id="chkMethodB" class="checkbox-custom" data-method="agent_b_on_a3" checked>
             </label>
             <label class="control-row">
               <span class="control-label">
                 <span class="swatch-line" style="background-color:#45def3;"></span>
-                <span style="color:#45def3; font-weight:600;">Teacher-assimilated (A2)</span>
+                <span style="color:#45def3; font-weight:600;">A2-assim</span>
               </span>
               <input type="checkbox" id="chkMethodA2Assim" class="checkbox-custom" data-method="agent_a2_assim" checked>
             </label>
             <label class="control-row">
               <span class="control-label">
                 <span class="swatch-line" style="background: repeating-linear-gradient(90deg, #00c2d6, #00c2d6 6px, transparent 6px, transparent 10px);"></span>
-                <span style="color:#00c2d6; font-weight:600;">Teacher-pure (A2-pure)</span>
+                <span style="color:#00c2d6; font-weight:600;">A2-pure</span>
               </span>
               <input type="checkbox" id="chkMethodA2Pure" class="checkbox-custom" data-method="agent_a2_pure" checked>
             </label>
             <label class="control-row">
               <span class="control-label">
                 <span class="swatch-line" style="background-color:#FFFFFF;"></span>
-                <span style="color:#FFFFFF; font-weight:600;">Static baseline</span>
+                <span style="color:#FFFFFF; font-weight:600;">A0 static</span>
               </span>
               <input type="checkbox" id="chkMethodStatic" class="checkbox-custom" data-method="static" checked>
             </label>
@@ -280,7 +282,7 @@
           <div class="key-legend-rows">
             <div class="legend-item">
               <span style="width:14px; height:2px; border-top:2px dashed #FFFFFF; display:inline-block;"></span>
-              <span>Observed perimeter (+11.4h truth)</span>
+              <span>Observed perimeter (+11.4h GeoMAC)</span>
             </div>
             <div class="legend-item">
               <span style="width:8px; height:8px; border-radius:50%; background:#93000a; border:1px solid #ffb4ab; display:inline-block;"></span>
@@ -316,11 +318,11 @@
     <div id="paneZones" class="tab-pane-overlay">
       <div class="pane-container">
         <div class="pane-header">
-          <h2 class="pane-title">Evacuation Zones Performance (14 Zones &amp; 3 Corridors)</h2>
+          <h2 class="pane-title">Evacuation Zones &amp; Corridors (14 Zones &amp; 3 Corridors)</h2>
           <button class="btn-close-pane" data-close="zones">CLOSE ✕</button>
         </div>
         <p style="font-family:var(--font-mono); font-size:11px; color:var(--on-surface-variant);">
-          Source: <code>out/demo/zones_summary.csv</code>. Click column headers to sort.
+          Source: <code>reports/step5d_per_zone_metrics.csv</code>. Caveat: Computed using stand-in A3 field (untrained surrogate smoke checkpoint). Route changes measured versus A0 static. Click column headers to sort.
         </p>
         <div class="data-table-wrapper">
           <table class="tactical-table" id="zonesSummaryTable">
@@ -328,10 +330,9 @@
               <tr>
                 <th data-sort="zone_or_corridor">Zone / Corridor ▾</th>
                 <th data-sort="type">Type</th>
-                <th data-sort="method">Routing Method</th>
                 <th data-sort="origins_count">Origins ($n$)</th>
-                <th data-sort="route_changes">Route Changes</th>
-                <th data-sort="margin_p10">Margin P10</th>
+                <th data-sort="route_changes">Route Changes vs Static</th>
+                <th data-sort="margin_p10">Margin P10 (A3 Field)</th>
                 <th data-sort="trapped_count">Trapped Count</th>
               </tr>
             </thead>
@@ -388,13 +389,13 @@
             Evacuation Operations Brief (T+120 min Simulation Milestone)
           </h3>
           <p>
-            <strong>SITUATION TELEMETRY:</strong> At 120 minutes post-ignition (08:33 PST), fire front propagation is concentrated along the Concow and eastern Paradise perimeter.
+            <strong>SITUATION TELEMETRY:</strong> At 120 minutes post-ignition (08:33 PST), fire front propagation extends along the eastern zone perimeters.
           </p>
           <p style="margin-top:6px;">
-            <strong>CORRIDOR RISK ASSESSMENT:</strong> Skyway corridor egress remains unobstructed south of Neal Road; Clark Road (SR-191) encounters active roadblock restrictions at km 14.2; Pentz Road egress is impaired by stationary abandoned vehicles (modelled constant onset 87.0 min, not an observation).
+            <strong>CORRIDOR RISK ASSESSMENT:</strong> Skyway corridor egress remains open; Clark Road encounters active roadblock restrictions; Pentz Road egress is impaired by stationary abandoned vehicles (modelled constant onset 87.0 min, not an observation).
           </p>
           <p style="margin-top:6px;">
-            <strong>TACTICAL GUIDANCE:</strong> Priority evacuation routes for Paradise Ridge (Zones 7, 8, 9) route southwest via Skyway toward Chico South.
+            <strong>TACTICAL GUIDANCE:</strong> Egress routes for eastern zones (Zones 7, 8, 9) route toward the Skyway corridor.
           </p>
         </div>
       </div>
@@ -430,7 +431,7 @@
                 <td><code>reports/step3a_perimeter_metrics.csv</code>, row 3</td>
               </tr>
               <tr>
-                <td><strong>Route Clearance Margin</strong></td>
+                <td><strong>Route Margin vs Hazards</strong></td>
                 <td>Done with caveats (predicted margins vacuous, smallest positive 149.8 min)</td>
                 <td>Burnover margins at 60m: 1/177 negative for static, 0 for other methods; B traps 6 origins vs 0 for static</td>
                 <td><code>reports/step2_hazard_type_margins.csv</code></td>

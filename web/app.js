@@ -83,36 +83,36 @@
   // Method Styling Configurations
   const METHOD_STYLES = {
     agent_a3: {
-      name: "Surrogate Forward (A3)",
-      note: "Surrogate 30m Updates",
+      name: "A3 surrogate stand-in",
+      note: "WindConditionedUNet 30m stand-in forward",
       color: "#45dfa4",
       strokeWidth: 3.5,
       dashArray: "none",
     },
     agent_b_on_a3: {
-      name: "Agent B-on-A3",
-      note: "Directional Buffering on A3",
+      name: "B on A3",
+      note: "Observation-driven provider with downwind cone heuristic",
       color: "#d3c3ff",
       strokeWidth: 2.5,
       dashArray: "8,3,2,3",
     },
     agent_a2_assim: {
-      name: "Teacher-assimilated (A2)",
-      note: "Causal Roadblock Assimilation",
+      name: "A2-assim",
+      note: "Teacher with causal NIST detection assimilation",
       color: "#45def3",
       strokeWidth: 3.5,
       dashArray: "none",
     },
     agent_a2_pure: {
-      name: "Teacher-pure (A2-pure)",
-      note: "Unassimilated Physics",
+      name: "A2-pure",
+      note: "Teacher unassimilated physics",
       color: "#00c2d6",
       strokeWidth: 2.5,
       dashArray: "6,4",
     },
     static: {
-      name: "Static Baseline",
-      note: "Fastest Path (Ignored Hazards)",
+      name: "A0 static",
+      note: "Static baseline shortest path",
       color: "#FFFFFF",
       strokeWidth: 3,
       dashArray: "none",
@@ -484,12 +484,12 @@
       let marginHtml = "";
       if (isTrapped) {
         marginHtml = `<span class="margin-chip trapped">trapped (no route)</span>`;
-      } else if (margin === null || margin === undefined || mData.margin_state === "no_hazard") {
-        marginHtml = `<span class="margin-chip neutral">no hazard on route</span>`;
+      } else if (margin === null || margin === undefined || mData.margin_state === "no_hazard" || margin === Infinity) {
+        marginHtml = `<span class="margin-chip neutral">No hazard on route</span>`;
       } else if (margin < 0) {
         marginHtml = `<span class="margin-chip negative">${margin.toFixed(1)} min</span>`;
       } else {
-        marginHtml = `<span class="margin-chip positive">+${margin.toFixed(1)} min</span>`;
+        marginHtml = `<span class="margin-chip neutral">+${margin.toFixed(1)} min</span>`;
       }
 
       let stateText = "";
@@ -498,17 +498,32 @@
       } else if (isMiss) {
         stateText = `<span style="color:var(--error); font-size:9px; font-weight:700;">⚠️ HAZARD OVERRUN</span>`;
       } else {
-        stateText = `<span style="color:var(--secondary); font-size:9px; font-weight:600;">CLEAR PASSAGE</span>`;
+        stateText = `<span style="color:var(--outline); font-size:9px; font-weight:600;">No hazard on route (not a safety margin)</span>`;
       }
 
+      const standinChip = mKey === "agent_a3" ? `<span class="chip-standin">STAND-IN (untrained surrogate)</span>` : "";
+
       card.innerHTML = `
-        <div class="route-card-left">
-          <span class="route-card-method" style="color:${style.color};">${style.name}</span>
-          <span class="route-card-desc">${distKm > 0 ? distKm + " km" : "N/A"} | ${stateText}</span>
-          <span class="route-source-cite">Cite: margin_min (from routes.json)</span>
-        </div>
-        <div class="route-card-right">
-          ${marginHtml}
+        <div class="route-card-left" style="width:100%;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <div style="display:flex; align-items:center;">
+              <span class="route-card-method" style="color:${style.color};">${style.name}</span>
+              ${standinChip}
+            </div>
+            <div>${stateText}</div>
+          </div>
+          <div style="font-family:var(--font-mono); font-size:10px; color:var(--on-surface-variant); margin-bottom:2px;">
+            Route travel time: NOT AVAILABLE | Distance: ${distKm > 0 ? distKm.toFixed(2) + " km" : "NOT AVAILABLE"}
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:10px; margin-top:2px;">
+            <span>Predicted margin (agent's own field):</span>
+            ${marginHtml}
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--on-surface-variant); margin-top:2px;">
+            <span>Margin to NIST burnovers:</span>
+            <span style="color:var(--outline); font-weight:600;">NOT AVAILABLE</span>
+          </div>
+          <div class="route-source-cite" style="margin-top:4px; color:var(--outline);">Cite: margin_min (src/wf052/routing/router.py:174)</div>
         </div>
       `;
 
@@ -537,14 +552,14 @@
     dom.zonesTableBody.innerHTML = "";
     records.forEach((r) => {
       const tr = document.createElement("tr");
+      const isTrappedNonZero = r.trapped_count && !r.trapped_count.startsWith("0/");
       tr.innerHTML = `
         <td><strong>${r.zone_or_corridor}</strong></td>
         <td>${r.type}</td>
-        <td><span style="color:var(--primary); font-weight:600;">${r.method}</span></td>
         <td>${r.origins_count}</td>
         <td>${r.route_changes}</td>
         <td><code>${r.margin_p10 || "NOT AVAILABLE"}</code></td>
-        <td><span style="${r.trapped_count !== '0/11' && r.trapped_count !== '0/200' ? 'color:var(--error); font-weight:700;' : ''}">${r.trapped_count}</span></td>
+        <td><span style="${isTrappedNonZero ? 'color:var(--error); font-weight:700;' : ''}">${r.trapped_count}</span></td>
       `;
       dom.zonesTableBody.appendChild(tr);
     });

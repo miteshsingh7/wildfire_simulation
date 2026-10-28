@@ -688,9 +688,23 @@ aside.left-rail {
 }
 
 .margin-chip.positive {
-  background-color: rgba(69, 223, 164, 0.15);
-  color: var(--secondary);
-  border: 1px solid var(--secondary);
+  background-color: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  border: 1px solid var(--stroke-subtle);
+}
+
+.chip-standin {
+  display: inline-block;
+  background-color: var(--surface-container-high);
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  margin-left: 4px;
+  vertical-align: middle;
 }
 
 .margin-chip.negative {

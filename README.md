@@ -167,7 +167,14 @@ A single-file, 100% offline HTML/SVG replay dashboard based on the Stitch UI spe
   - Or serve locally: `python scripts/serve_web.py` and open `http://localhost:8000`.
 - **How to rebuild:**
   - Run `python scripts/build_web_demo.py`. This reads precomputed assets from `out/demo/`, simplifies GeoJSON geometries (Douglas-Peucker tolerance `0.0001` deg ~11m, coordinates rounded to 5 decimals), and inlines all CSS tokens, ES6 JS logic, bundled Latin WOFF2 fonts, and JSON payloads into `web/dist/index.html` (5.85 MB, under the 10 MB limit).
-  - Verify with Playwright headless Chromium: `python scripts/verify_web_demo.py` (asserts zero non-file/non-localhost network requests, zero console errors, tests UI interactions, and captures screenshots to `reports/ui/`).
+- **Headless Playwright Verification (`scripts/verify_web_demo.py`):**
+  - **Prerequisites**: Requires `playwright` with Chromium installed:
+    ```bash
+    pip install playwright
+    playwright install chromium
+    ```
+  - **Python Interpreter**: Execute via an environment with Playwright installed (e.g. `/Users/miteshsingh/.pyenv/versions/3.10.13/bin/python scripts/verify_web_demo.py`). The project virtual environment (`.venv`) was configured with minimal core dependencies without Playwright; the global pyenv 3.10.13 environment contains Playwright and its headless Chromium browser binaries.
+  - **Assertions Verified**: Verifies 0 non-file/non-localhost network requests (100% offline), 0 console errors, persistent disclaimer strip phrases, Surrogate stand-in warning chip, neutral route card text (`No hazard on route (not a safety margin)` and `Margin to NIST burnovers: NOT AVAILABLE`), exactly 17 rows in the Zones table, and saves viewport and tab screenshots to `reports/ui/`.
 - **What it does NOT do:**
   - **No live router execution**: Routes are precomputed in `out/demo/routes.json` across 7 comparative methods (A1, A2, A2-assim, A3, B, static, live). The dashboard does not run Dijkstra/A* routing dynamically.
   - **No trained surrogate**: Arrival surfaces and isochrones were generated using stand-in smoke weights (`STAND-IN WEIGHTS` via `CKPT=checkpoints/best.pt`). No full-data trained surrogate weights are evaluated.

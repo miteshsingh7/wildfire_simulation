@@ -162,8 +162,16 @@ def build() -> None:
     with open(demo_dir / "zones.geojson") as f:
         zones = simplify_geojson(json.load(f), tolerance=TOLERANCE_DEG)
 
-    # Zones summary CSV
-    df_zones = pd.read_csv(demo_dir / "zones_summary.csv")
+    # Zones summary CSV: load 14 zone rows and 3 corridor rows for A3 stand-in field
+    step5d_csv = repo_root / "reports" / "step5d_per_zone_metrics.csv"
+    if step5d_csv.exists():
+        df_zones = pd.read_csv(step5d_csv)
+        if "method" in df_zones.columns:
+            df_zones = df_zones[df_zones["method"] == "A3 (Surrogate)"]
+    else:
+        df_zones = pd.read_csv(demo_dir / "zones_summary.csv")
+        if "method" in df_zones.columns:
+            df_zones = df_zones[df_zones["method"] == "A3 (Surrogate)"]
     zones_summary = df_zones.to_dict(orient="records")
 
     # Isochrones
