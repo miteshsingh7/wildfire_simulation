@@ -159,6 +159,20 @@ PYTHONPATH=src streamlit run app/demo.py
 PYTHONPATH=src:scripts .venv/bin/python scripts/test_demo_headless.py
 ```
 
+### 1b. Standalone Offline Web Demo (Stitch Dashboard)
+A single-file, 100% offline HTML/SVG replay dashboard based on the Stitch UI specification (`design/stitch/`):
+
+- **How to open:**
+  - Double-click `web/dist/index.html` in any browser (`open web/dist/index.html` on macOS, `start web/dist/index.html` on Windows).
+  - Or serve locally: `python scripts/serve_web.py` and open `http://localhost:8000`.
+- **How to rebuild:**
+  - Run `python scripts/build_web_demo.py`. This reads precomputed assets from `out/demo/`, simplifies GeoJSON geometries (Douglas-Peucker tolerance `0.0001` deg ~11m, coordinates rounded to 5 decimals), and inlines all CSS tokens, ES6 JS logic, bundled Latin WOFF2 fonts, and JSON payloads into `web/dist/index.html` (5.85 MB, under the 10 MB limit).
+  - Verify with Playwright headless Chromium: `python scripts/verify_web_demo.py` (asserts zero non-file/non-localhost network requests, zero console errors, tests UI interactions, and captures screenshots to `reports/ui/`).
+- **What it does NOT do:**
+  - **No live router execution**: Routes are precomputed in `out/demo/routes.json` across 7 comparative methods (A1, A2, A2-assim, A3, B, static, live). The dashboard does not run Dijkstra/A* routing dynamically.
+  - **No trained surrogate**: Arrival surfaces and isochrones were generated using stand-in smoke weights (`STAND-IN WEIGHTS` via `CKPT=checkpoints/best.pt`). No full-data trained surrogate weights are evaluated.
+  - **Zero safety claims**: Academic post-incident replay tool; does not provide certified safe evacuation routes or real-time navigation.
+
 ### 2. Full Evacuation Replay Simulation & Empirical Hazard Audit
 Runs the comparative agent configurations against 436 NIST empirical truth hazards (burnovers, roadblocks, abandoned vehicles) and computes timing error across unique corridor hazards:
 ```bash

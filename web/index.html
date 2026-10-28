@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>INCIDENT-052: Wildfire Spread Simulation & Evacuation Routing</title>
+  <!-- INLINE_CSS -->
+</head>
+<body>
+  <div id="app">
+    <!-- APP HEADER -->
+    <header class="app-header">
+      <div class="header-top">
+        <div class="header-brand">
+          <button id="btnToggleSidebar" class="btn-drawer-toggle" aria-label="Toggle Controls Sidebar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+            <span>CONTROLS</span>
+          </button>
+          <span class="badge-incident">INCIDENT-052</span>
+          <h1 class="app-title">Wildfire Spread &amp; Evacuation Routing</h1>
+          <div class="header-sep"></div>
+          <div class="scenario-pill">
+            <span class="scenario-label">SCENARIO:</span>
+            <span class="scenario-value">Camp Fire 2018 (development case)</span>
+          </div>
+        </div>
+
+        <div class="header-meta">
+          <div class="mission-time-card">
+            <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+            <div class="mission-time-details">
+              <span class="mission-time-label">MISSION TIME</span>
+              <span id="headerClockReadout" class="mission-time-clock">T+120 min (08:33 PST)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NAVIGATION TABS -->
+      <div class="header-nav">
+        <nav class="nav-tabs" aria-label="Application Tabs">
+          <button id="tabBtnConsole" class="nav-tab-btn active" data-tab="console">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            <span>Tactical Command Console</span>
+          </button>
+          <button id="tabBtnZones" class="nav-tab-btn" data-tab="zones">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+            <span>Evacuation Zones (14 Zones)</span>
+          </button>
+          <button id="tabBtnLatency" class="nav-tab-btn" data-tab="latency">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg>
+            <span>System Latency &amp; Brief</span>
+          </button>
+          <button id="tabBtnStatus" class="nav-tab-btn" data-tab="status">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+            <span>Status &amp; Limitations</span>
+          </button>
+        </nav>
+        <div class="gis-meta">GIS PROJECTION: EPSG:3857 (WGS 84 / Pseudo-Mercator)</div>
+      </div>
+    </header>
+
+    <!-- PERSISTENT DISCLAIMER STRIP -->
+    <div class="persistent-disclaimer-strip" role="alert">
+      <div class="disclaimer-left">
+        <svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>
+        <span class="disclaimer-title">STAND-IN WEIGHTS: surrogate untrained</span>
+        <span>|</span>
+        <span>DEVELOPMENT CASE</span>
+        <span>|</span>
+        <span class="disclaimer-alert">RESEARCH ONLY: not for evacuation or life-safety decisions.</span>
+      </div>
+      <div class="disclaimer-right">
+        <span class="status-dot"></span>
+        <span>MODEL: STAND-IN WEIGHTS</span>
+      </div>
+    </div>
+
+    <!-- MAIN WORKBENCH (MAP & CONTROLS) -->
+    <div class="workbench-container" id="consoleWorkbench">
+      <!-- LEFT SIDEBAR -->
+      <aside class="left-rail" id="leftRail">
+        <!-- 1. Layer Visibility & Source Engine -->
+        <div class="sidebar-card">
+          <div class="card-header">
+            <span class="card-title">LAYER VISIBILITY</span>
+            <span class="card-badge">Active</span>
+          </div>
+
+          <!-- Field Source Segmented Control -->
+          <div class="source-toggle-group">
+            <button id="srcBtnSurrogate" class="source-toggle-btn active" data-src="surrogate">Surrogate</button>
+            <button id="srcBtnTeacher" class="source-toggle-btn" data-src="teacher">Teacher v2</button>
+          </div>
+
+          <!-- Stand-in Surrogate Output Warning Chip -->
+          <div id="surrogateWarningChip" class="warning-chip">
+            <span>⚠️</span>
+            <span>Stand-in output, covers the whole domain</span>
+          </div>
+
+          <!-- Checkboxes for Layers -->
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <label class="control-row">
+              <span class="control-label">Predicted fire perimeter</span>
+              <input type="checkbox" id="chkPredictedPerimeter" class="checkbox-custom" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">Arrival isochrones (1h - 6h)</span>
+              <input type="checkbox" id="chkIsochrones" class="checkbox-custom" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">Observed ground truth (+11.4h)</span>
+              <input type="checkbox" id="chkObservedPerimeter" class="checkbox-custom" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">Active corridor hazards</span>
+              <input type="checkbox" id="chkHazards" class="checkbox-custom" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">Computed evacuation routes</span>
+              <input type="checkbox" id="chkRoutes" class="checkbox-custom" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">30-min update markers</span>
+              <input type="checkbox" id="chkUpdates" class="checkbox-custom" checked>
+            </label>
+          </div>
+        </div>
+
+        <!-- 2. Routing Algorithms & Distinct Dash Patterns -->
+        <div class="sidebar-card">
+          <div class="card-header">
+            <span class="card-title">ROUTING ALGORITHMS</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <label class="control-row">
+              <span class="control-label">
+                <span class="swatch-line" style="background-color:#45dfa4;"></span>
+                <span style="color:#45dfa4; font-weight:600;">Surrogate Forward (A3)</span>
+              </span>
+              <input type="checkbox" id="chkMethodA3" class="checkbox-custom" data-method="agent_a3" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">
+                <span class="swatch-line" style="background: repeating-linear-gradient(90deg, #d3c3ff, #d3c3ff 8px, transparent 8px, transparent 11px, #d3c3ff 11px, #d3c3ff 13px, transparent 13px, transparent 16px);"></span>
+                <span style="color:#d3c3ff; font-weight:600;">Agent B-on-A3</span>
+              </span>
+              <input type="checkbox" id="chkMethodB" class="checkbox-custom" data-method="agent_b_on_a3" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">
+                <span class="swatch-line" style="background-color:#45def3;"></span>
+                <span style="color:#45def3; font-weight:600;">Teacher-assimilated (A2)</span>
+              </span>
+              <input type="checkbox" id="chkMethodA2Assim" class="checkbox-custom" data-method="agent_a2_assim" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">
+                <span class="swatch-line" style="background: repeating-linear-gradient(90deg, #00c2d6, #00c2d6 6px, transparent 6px, transparent 10px);"></span>
+                <span style="color:#00c2d6; font-weight:600;">Teacher-pure (A2-pure)</span>
+              </span>
+              <input type="checkbox" id="chkMethodA2Pure" class="checkbox-custom" data-method="agent_a2_pure" checked>
+            </label>
+            <label class="control-row">
+              <span class="control-label">
+                <span class="swatch-line" style="background-color:#FFFFFF;"></span>
+                <span style="color:#FFFFFF; font-weight:600;">Static baseline</span>
+              </span>
+              <input type="checkbox" id="chkMethodStatic" class="checkbox-custom" data-method="static" checked>
+            </label>
+          </div>
+        </div>
+
+        <!-- 3. Focused Origin Picker -->
+        <div class="sidebar-card">
+          <div class="card-header">
+            <span class="card-title">FOCUSED ORIGIN</span>
+            <span id="originCounterBadge" class="card-badge">193 Total</span>
+          </div>
+
+          <div class="origin-search-box">
+            <select id="originPickerSelect" class="origin-select" aria-label="Select Focused Origin">
+              <!-- Populated dynamically via JS -->
+            </select>
+            <div class="origin-quick-nav">
+              <button id="btnPrevOrigin" class="btn-nav-origin">◀ PREV ORIGIN</button>
+              <button id="btnNextOrigin" class="btn-nav-origin">NEXT ORIGIN ▶</button>
+            </div>
+          </div>
+
+          <div class="origin-detail-banner">
+            <div class="origin-title-row">
+              <span id="bannerOriginId" class="origin-id-text">ORIGIN: #5383262919</span>
+              <span id="bannerOriginZone" class="origin-zone-pill">Zone_1</span>
+            </div>
+            <div id="bannerDepartureTime" class="origin-sub-text">Departure: +0.0 min (06:33 PST)</div>
+          </div>
+        </div>
+
+        <!-- 4. Route Evaluation Summary Cards -->
+        <div class="sidebar-card">
+          <div class="card-header">
+            <span class="card-title">ROUTE EVALUATION SUMMARY</span>
+            <span id="routeSummaryZoneTag" class="card-badge">Zone Exit</span>
+          </div>
+
+          <div id="routeCardsContainer" class="route-cards-list">
+            <!-- Dynamic route evaluation cards inserted here -->
+          </div>
+
+          <button id="btnReplanTrigger" class="btn-replan-action">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            <span>Re-plan Evacuation Route</span>
+          </button>
+          <div id="replanFeedbackMsg" style="display:none; font-family:var(--font-mono); font-size:9px; color:var(--secondary); text-align:center;">
+            Routing recalculated from precomputed table (10.58 ms/origin)
+          </div>
+        </div>
+      </aside>
+
+      <!-- CENTER GIS CANVAS -->
+      <main class="center-map-area">
+        <div class="map-hud-overlay">
+          <div class="hud-pill">
+            <span class="status-dot"></span>
+            <span class="hud-title">Tactical GIS Canvas</span>
+          </div>
+          <div class="map-zoom-tools">
+            <button id="btnZoomIn" class="btn-map-tool" title="Zoom In">+</button>
+            <button id="btnZoomOut" class="btn-map-tool" title="Zoom Out">−</button>
+            <button id="btnResetView" class="btn-map-tool" title="Reset View" style="width:auto; padding:0 8px; font-size:10px;">RESET</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrapper" id="canvasWrapper">
+          <svg id="gisMapSvg" viewBox="0 0 1000 700" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <!-- Cartesian Topo Grid Pattern -->
+              <pattern id="topoGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#273647" stroke-width="0.5" stroke-opacity="0.3"/>
+              </pattern>
+            </defs>
+            <!-- Background base -->
+            <rect width="100%" height="100%" fill="#051424"/>
+            <rect width="100%" height="100%" fill="url(#topoGrid)"/>
+
+            <!-- Dynamic GIS Layer Groups -->
+            <g id="layerIsochrones"></g>
+            <g id="layerPerimeters"></g>
+            <g id="layerZones"></g>
+            <g id="layerRoads"></g>
+            <g id="layerRoutes"></g>
+            <g id="layerUpdates"></g>
+            <g id="layerHazards"></g>
+            <g id="layerOriginMarker"></g>
+          </svg>
+        </div>
+
+        <!-- Floating Cartography Key -->
+        <div class="cartography-key-card">
+          <div class="key-header">
+            <span class="key-title">CARTOGRAPHY KEY</span>
+            <span class="key-proj">EPSG:3857</span>
+          </div>
+          <div>
+            <span style="font-family:var(--font-mono); font-size:9px; color:var(--on-surface-variant); display:block; margin-bottom:2px;">FIRE SPREAD ISOCHRONES</span>
+            <div class="isochrone-scale-bar">
+              <div style="background-color:#fde047;" title="1h"></div>
+              <div style="background-color:#f59e0b;" title="2h"></div>
+              <div style="background-color:#f97316;" title="3h"></div>
+              <div style="background-color:#ea580c;" title="4h"></div>
+              <div style="background-color:#dc2626;" title="5h"></div>
+              <div style="background-color:#991b1b;" title="6h"></div>
+            </div>
+            <div class="isochrone-scale-labels">
+              <span>1h</span><span>2h</span><span>3h</span><span>4h</span><span>5h</span><span>6h</span>
+            </div>
+          </div>
+          <div class="key-legend-rows">
+            <div class="legend-item">
+              <span style="width:14px; height:2px; border-top:2px dashed #FFFFFF; display:inline-block;"></span>
+              <span>Observed perimeter (+11.4h truth)</span>
+            </div>
+            <div class="legend-item">
+              <span style="width:8px; height:8px; border-radius:50%; background:#93000a; border:1px solid #ffb4ab; display:inline-block;"></span>
+              <span>Burnover incident</span>
+            </div>
+            <div class="legend-item">
+              <span style="width:0; height:0; border-left:4px solid transparent; border-right:4px solid transparent; border-bottom:8px solid #f59e0b; display:inline-block;"></span>
+              <span>Roadblock obstruction</span>
+            </div>
+            <div class="legend-item">
+              <span style="width:8px; height:8px; border:1px solid #859396; background:#1c2b3c; display:inline-block;"></span>
+              <span>Abandoned vehicle*</span>
+            </div>
+            <div class="legend-footnote">
+              *Abandoned-vehicle onset is a modelled constant (87 min), not an observation.
+            </div>
+          </div>
+          <div class="key-footer-scale">
+            <span>TRUE NORTH ▲</span>
+            <div class="scale-measure">
+              <span class="scale-line"></span>
+              <span>2 KM</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Map Hover Tooltip -->
+        <div id="mapTooltip" class="map-tooltip"></div>
+      </main>
+    </div>
+
+    <!-- TAB OVERLAY 1: ZONES TABLE -->
+    <div id="paneZones" class="tab-pane-overlay">
+      <div class="pane-container">
+        <div class="pane-header">
+          <h2 class="pane-title">Evacuation Zones Performance (14 Zones &amp; 3 Corridors)</h2>
+          <button class="btn-close-pane" data-close="zones">CLOSE ✕</button>
+        </div>
+        <p style="font-family:var(--font-mono); font-size:11px; color:var(--on-surface-variant);">
+          Source: <code>out/demo/zones_summary.csv</code>. Click column headers to sort.
+        </p>
+        <div class="data-table-wrapper">
+          <table class="tactical-table" id="zonesSummaryTable">
+            <thead>
+              <tr>
+                <th data-sort="zone_or_corridor">Zone / Corridor ▾</th>
+                <th data-sort="type">Type</th>
+                <th data-sort="method">Routing Method</th>
+                <th data-sort="origins_count">Origins ($n$)</th>
+                <th data-sort="route_changes">Route Changes</th>
+                <th data-sort="margin_p10">Margin P10</th>
+                <th data-sort="trapped_count">Trapped Count</th>
+              </tr>
+            </thead>
+            <tbody id="zonesTableBody">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB OVERLAY 2: LATENCY & BRIEF -->
+    <div id="paneLatency" class="tab-pane-overlay">
+      <div class="pane-container">
+        <div class="pane-header">
+          <h2 class="pane-title">System Latency Benchmark &amp; Agent Brief</h2>
+          <button class="btn-close-pane" data-close="latency">CLOSE ✕</button>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-panel">
+            <span class="metric-panel-title">NETWORK ROUTER + VALIDATOR</span>
+            <span class="metric-panel-val">2,115.74 ms</span>
+            <span class="metric-panel-sub">Per 30-min replan cycle across all 200 origins (10.58 ms/origin)</span>
+            <span style="font-family:var(--font-mono); font-size:9px; color:var(--outline);">Cite: reports/step4_latency_summary.csv, row 1</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-panel-title">SURROGATE FORWARD PASS</span>
+            <span class="metric-panel-val">34.51 ms</span>
+            <span class="metric-panel-sub">Per 256×256 tile on Apple M1 MPS (310.59 ms for 9 tiles)</span>
+            <span style="font-family:var(--font-mono); font-size:9px; color:var(--outline);">Cite: reports/step4_latency_summary.csv, rows 2, 3</span>
+          </div>
+          <div class="metric-panel">
+            <span class="metric-panel-title">TEACHER V2 SIMULATION</span>
+            <span class="metric-panel-val">2,747.21 ms</span>
+            <span class="metric-panel-sub">Mean across 5 seeds on full 564×562 domain (12 h, 360 steps)</span>
+            <span style="font-family:var(--font-mono); font-size:9px; color:var(--outline);">Cite: reports/step4_latency_summary.csv, row 9</span>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-start; margin-top:8px;">
+          <button id="btnShowLatencyHistory" class="btn-nav-origin" style="padding:6px 14px; font-weight:700;">
+            Show recorded re-plan latency (not a live call)
+          </button>
+        </div>
+        <div id="recordedLatencyLog" style="display:none; background:var(--surface-container-low); border:1px solid var(--stroke-subtle); padding:10px; border-radius:var(--radius-md); font-family:var(--font-mono); font-size:10px;">
+          <strong>Recorded 30-Minute Cycle Latency Events (from updates.geojson):</strong>
+          <div id="latencyEventsList" style="margin-top:6px; display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:6px;"></div>
+        </div>
+
+        <div class="brief-container" style="margin-top:12px;">
+          <div class="chip-llm-not-run">LLM NOT RUN (DETERMINISTIC TEMPLATE BRIEF)</div>
+          <h3 style="font-family:var(--font-headline); font-size:14px; font-weight:700; margin-bottom:8px; color:var(--primary);">
+            Evacuation Operations Brief (T+120 min Simulation Milestone)
+          </h3>
+          <p>
+            <strong>SITUATION TELEMETRY:</strong> At 120 minutes post-ignition (08:33 PST), fire front propagation is concentrated along the Concow and eastern Paradise perimeter.
+          </p>
+          <p style="margin-top:6px;">
+            <strong>CORRIDOR RISK ASSESSMENT:</strong> Skyway corridor egress remains unobstructed south of Neal Road; Clark Road (SR-191) encounters active roadblock restrictions at km 14.2; Pentz Road egress is impaired by stationary abandoned vehicles (modelled constant onset 87.0 min, not an observation).
+          </p>
+          <p style="margin-top:6px;">
+            <strong>TACTICAL GUIDANCE:</strong> Priority evacuation routes for Paradise Ridge (Zones 7, 8, 9) route southwest via Skyway toward Chico South.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB OVERLAY 3: STATUS & LIMITATIONS -->
+    <div id="paneStatus" class="tab-pane-overlay">
+      <div class="pane-container">
+        <div class="pane-header">
+          <h2 class="pane-title">System Verification Status, Claims &amp; Limitations</h2>
+          <button class="btn-close-pane" data-close="status">CLOSE ✕</button>
+        </div>
+
+        <!-- Spec Metrics Summary Table -->
+        <h3 style="font-family:var(--font-headline); font-size:14px; color:var(--primary); font-weight:700;">
+          Specification Metrics &amp; Verification Status
+        </h3>
+        <div class="data-table-wrapper">
+          <table class="tactical-table">
+            <thead>
+              <tr>
+                <th>Specification Metric</th>
+                <th>Measured Value / Status</th>
+                <th>Benchmark Dataset / Context</th>
+                <th>Citation Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Perimeter Projection Accuracy</strong></td>
+                <td>Teacher median IoU <strong>0.3147</strong> [0.1658, 0.3763]</td>
+                <td>Evaluated against GeoMAC 1052 (+11.4h) over 20 fixed seeds; surrogate not done (untrained weights)</td>
+                <td><code>reports/step3a_perimeter_metrics.csv</code>, row 3</td>
+              </tr>
+              <tr>
+                <td><strong>Route Clearance Margin</strong></td>
+                <td>Done with caveats (predicted margins vacuous, smallest positive 149.8 min)</td>
+                <td>Burnover margins at 60m: 1/177 negative for static, 0 for other methods; B traps 6 origins vs 0 for static</td>
+                <td><code>reports/step2_hazard_type_margins.csv</code></td>
+              </tr>
+              <tr>
+                <td><strong>Re-Plan Event Latency</strong></td>
+                <td>Done: <strong>2,115.74 ms</strong> per update across 200 origins</td>
+                <td>10.58 ms per origin router+validator; 34.51 ms per tile (310.59 ms for 9 tiles) surrogate pass</td>
+                <td><code>reports/step4_latency_summary.csv</code>, rows 1, 2</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Claims and Evidence -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); margin-top:12px;">
+          <div class="metric-panel">
+            <span class="card-title" style="color:var(--secondary); font-size:12px;">WHAT THE SYSTEM CAN CLAIM</span>
+            <ol style="margin-left:16px; font-family:var(--font-body); font-size:11px; line-height:1.6; color:var(--on-surface);">
+              <li><strong>Inference Time of Untrained Architecture:</strong> 34.51 ms per tile (310.59 ms for 9 tiles); no fidelity claim (cite <code>reports/step4_latency_summary.csv</code>).</li>
+              <li><strong>Interactive Evacuation Re-Planning:</strong> Network router evaluates 200 origins in 2,115.74 ms (10.58 ms/origin) (cite <code>reports/step4_latency_summary.csv</code>).</li>
+              <li><strong>Burnover Margins by Method (Inconclusive):</strong> Negative burnovers at 60m are 1 of 177 for static, 0 for other methods; at 30m B on A2-assim median 35.9 from n=13 origins vs 84.5 for static from n=118; no CI computed; inconclusive (cite <code>reports/step2_hazard_type_margins.csv</code>).</li>
+              <li><strong>Burnover Timing Error in Teacher:</strong> Seed 42 is low-area seed (5,491 ha, ~5th percentile); 8 of 10 corridor burnovers never burn and 2 arrive with median +157 min late (cite <code>reports/step2_timing_by_hazard_type.csv</code>).</li>
+            </ol>
+          </div>
+
+          <div class="metric-panel">
+            <span class="card-title" style="color:var(--error); font-size:12px;">WHAT THE SYSTEM CANNOT CLAIM</span>
+            <ol style="margin-left:16px; font-family:var(--font-body); font-size:11px; line-height:1.6; color:var(--on-surface);">
+              <li><strong>NO Safety Guarantees:</strong> Academic research demonstration only; never for live tactical navigation or life-safety decisions.</li>
+              <li><strong>NO Superiority in Overall Margins:</strong> A2-assim median truth margin -37.0 min vs -31.5 min for static against all 436 NIST hazards; cause not tested.</li>
+              <li><strong>NO Independent Ground Truth:</strong> Teacher field not validated against road impassability. Assimilation ingests empirical observations sharing source document with hazards.</li>
+              <li><strong>NO Production Readiness:</strong> Checkpoint from phase 3A trained 2 epochs on 66 smoke shards; A3-reignite burned 85.5% of tile; cannot be claimed as validated surrogate.</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Limitations List -->
+        <div class="metric-panel" style="margin-top:12px;">
+          <span class="card-title" style="font-size:12px;">AUDITED LIMITATIONS (FROM REPORT.MD)</span>
+          <ul style="margin-left:16px; font-family:var(--font-mono); font-size:10px; line-height:1.6; color:var(--on-surface-variant);">
+            <li>1. HRRR Analysis vs Forecast: Atmospheric wind inputs use post-event analysis (fxx=0), not operational forecasts.</li>
+            <li>2. NIST Timestamps: Hazard onsets reconstructed from NIST TN 2252; abandoned vehicles have modelled constant onset at 87.0 min (harness assumption, not observation).</li>
+            <li>3. K=3 Corridors: Destination exits grouped into 3 corridors (Skyway, Clark Rd, Pentz/Hwy 70).</li>
+            <li>4. Physics Calibration Drift: Teacher under-burns Camp Fire by ~2x and over-burns training fires (Mean Area Ratio 5.597).</li>
+            <li>5. Development Case: Camp Fire is unseen development case, strictly excluded from surrogate training.</li>
+            <li>6. Shared Provenance: Observation assimilation shares source data with evaluation hazards.</li>
+            <li>7. Provider B Heuristic: Uses geometric directional cone rather than microscopic ember simulator.</li>
+            <li>8. Vehicles Clear Early: Vehicles complete travel before simulated fire reaches Paradise (smallest positive predicted margin 149.8 min).</li>
+            <li>9. Route Redundancy: Agents A and A2-pure produce identical routes in every table.</li>
+            <li>10. Surrogate Over-Burn: Phase 4A surrogate output covered whole domain; A3-reignite burned 85.5% of tile.</li>
+            <li>11. No Held-Out Teacher Test: No held-out teacher fire test was conducted.</li>
+            <li>12. No Trained Surrogate Result: No trained surrogate result is reported in this version.</li>
+            <li>13. Measured Latencies: 34.51 ms per tile, 310.59 ms domain coverage (retracted earlier narrative 24.1 ms).</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM TIMELINE SCRUBBER -->
+    <footer class="timeline-bar">
+      <div class="timeline-controls">
+        <button id="btnTimelineReplay10" class="btn-ctrl" title="Step Back 10 Minutes">◀ 10</button>
+        <button id="btnTimelinePlay" class="btn-ctrl primary-play" title="Play / Pause Timeline">▶</button>
+        <button id="btnTimelineFwd10" class="btn-ctrl" title="Step Forward 10 Minutes">10 ▶</button>
+      </div>
+
+      <div class="timeline-track-area">
+        <div class="timeline-meta-row">
+          <span>T+0 min (06:33 IGNITION)</span>
+          <div>
+            <span style="color:var(--primary); font-weight:600;">RE-PLAN INTERVAL: 30 MIN</span>
+            <span style="color:var(--outline);">|</span>
+            <span id="replanCycleText" style="color:var(--secondary); font-weight:700;">RE-PLAN #4 ACTIVE</span>
+          </div>
+          <span>T+360 min (12:33 PST)</span>
+        </div>
+
+        <div class="timeline-slider-wrapper">
+          <input type="range" id="timelineRange" class="timeline-slider" min="0" max="360" step="10" value="120" aria-label="Replay Time Slider in Minutes">
+          <div class="timeline-dots-row">
+            <span class="timeline-dot" title="0m"></span>
+            <span class="timeline-dot" title="30m"></span>
+            <span class="timeline-dot" title="60m"></span>
+            <span class="timeline-dot" title="90m"></span>
+            <span class="timeline-dot" title="120m"></span>
+            <span class="timeline-dot" title="150m"></span>
+            <span class="timeline-dot" title="180m"></span>
+            <span class="timeline-dot" title="210m"></span>
+            <span class="timeline-dot" title="240m"></span>
+            <span class="timeline-dot" title="270m"></span>
+            <span class="timeline-dot" title="300m"></span>
+            <span class="timeline-dot" title="330m"></span>
+            <span class="timeline-dot" title="360m"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="timeline-clock-readout">
+        <span class="clock-label">CURRENT CLOCK</span>
+        <span id="timelineClockText" class="clock-time">08:33 PST</span>
+      </div>
+    </footer>
+
+    <!-- APP FOOTER -->
+    <footer class="app-footer">
+      <div class="footer-left">
+        <span>INCIDENT-052 TACTICAL ENGINE</span>
+        <span style="color:var(--stroke-focus);">|</span>
+        <span>OFFLINE REPLAY (precomputed)</span>
+      </div>
+      <div class="footer-center">
+        <span>TAG: surrogate-final-r2</span>
+        <span>COMMIT: 2d121ba</span>
+        <span>CFG: a6a92f81f7a9c72b5899d5d3173f86943a7f98648c4f210dcc5c646d2b4e85a5</span>
+      </div>
+      <div class="footer-right">
+        <span class="status-dot"></span>
+        <span>TELEMETRY SYNC VALID</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- INLINE_JS -->
+</body>
+</html>

@@ -23,6 +23,7 @@
 - **NIST Empirical Hazard Safety Margins (Burnovers, Roadblocks, Abandoned Vehicles)**: Done with caveats (burnovers and roadblocks have empirical timestamps; abandoned vehicles have modelled constant onset at 87.0 min set in `src/wf052/replay/harness.py` line 133 as a harness assumption, not an observation).
 - **Hazard Corridor Timing Error Analysis**: Done (deduped by unique hazard ID; Clark Rd $n=6$, Skyway $n=2$, Pentz/Hwy 70 $n=2$ for burnovers; cite `reports/step2_timing_by_hazard_type.csv`).
 - **Interactive Streamlit Replay Demo**: Done with caveats (offline map canvas with optional Carto basemap; zero network requests in a live browser is NOT VERIFIED).
+- **Standalone Offline Web UI**: Done (5.85 MB standalone `web/dist/index.html`, 100% offline verified via headless Chromium with zero external requests; cite `reports/ui/`).
 
 ---
 
